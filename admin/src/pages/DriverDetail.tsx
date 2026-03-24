@@ -510,10 +510,16 @@ export default function DriverDetail() {
         if (!id || !assignmentForm.license_plate || !assignmentForm.start_at) return;
         setBusy(true);
 
+        const normalizedEndAt = assignmentForm.end_at
+            ? toIsoOrUndefined(assignmentForm.end_at)
+            : editingAssignmentId
+              ? null
+              : undefined;
+
         const payload = {
             license_plate: assignmentForm.license_plate.trim(),
             start_at: toIsoOrUndefined(assignmentForm.start_at),
-            end_at: toIsoOrUndefined(assignmentForm.end_at),
+            end_at: normalizedEndAt,
         };
 
         try {

@@ -252,7 +252,7 @@ class ApiService {
         driver_id: string;
         license_plate: string;
         start_at?: string;
-        end_at?: string;
+        end_at?: string | null;
         previous_assignment_id?: string;
         acknowledge_overlap?: boolean;
     }) {
@@ -276,7 +276,7 @@ class ApiService {
         data: {
             license_plate?: string;
             start_at?: string;
-            end_at?: string;
+            end_at?: string | null;
             acknowledge_overlap?: boolean;
         }
     ) {

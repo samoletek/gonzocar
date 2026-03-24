@@ -199,15 +199,22 @@ def run_with_gmail(hours: int = 1, max_results: int = 50) -> bool:
         
         db = get_db()
         processed = 0
+        failed = 0
         
         try:
             for email_data in emails:
-                print(f"\nProcessing email {email_data['gmail_id']}...")
-                if process_email(db, email_data['raw'], email_data['gmail_id']):
-                    processed += 1
-            
-            db.commit()
-            print(f"\nDone! Processed {processed} new payments")
+                gmail_id = email_data["gmail_id"]
+                print(f"\nProcessing email {gmail_id}...")
+                try:
+                    if process_email(db, email_data["raw"], gmail_id):
+                        db.commit()
+                        processed += 1
+                except Exception as email_error:
+                    db.rollback()
+                    failed += 1
+                    print(f"  Error processing email {gmail_id}: {email_error}")
+
+            print(f"\nDone! Processed {processed} new payments" + (f", failed {failed}" if failed else ""))
             return True
             
         finally:
@@ -232,16 +239,22 @@ def run_with_local_files(directory: str) -> bool:
     
     db = get_db()
     processed = 0
+    failed = 0
     
     try:
         for eml_path in eml_files:
             print(f"\nProcessing {eml_path.name}...")
-            with open(eml_path, 'rb') as f:
-                if process_email(db, f.read()):
-                    processed += 1
-        
-        db.commit()
-        print(f"\nDone! Processed {processed} new payments")
+            try:
+                with open(eml_path, 'rb') as f:
+                    if process_email(db, f.read()):
+                        db.commit()
+                        processed += 1
+            except Exception as file_error:
+                db.rollback()
+                failed += 1
+                print(f"  Error processing {eml_path.name}: {file_error}")
+
+        print(f"\nDone! Processed {processed} new payments" + (f", failed {failed}" if failed else ""))
         return True
         
     finally:

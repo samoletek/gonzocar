@@ -15,7 +15,7 @@ For local development:
 import os
 import json
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -146,9 +146,10 @@ class GmailService:
     
     def _build_query(self, since_hours: int = 1) -> str:
         """Build Gmail search query for payment emails."""
-        # Time filter
-        since = datetime.utcnow() - timedelta(hours=since_hours)
-        date_str = since.strftime('%Y/%m/%d')
+        # Time filter with hour-level precision via Unix timestamp.
+        safe_hours = max(1, int(since_hours))
+        since = datetime.now(timezone.utc) - timedelta(hours=safe_hours)
+        since_ts = int(since.timestamp())
         
         # Build sender filter (OR between known payment providers)
         sender_queries = [f'from:{sender}' for sender in PAYMENT_SENDERS]
@@ -156,7 +157,7 @@ class GmailService:
         delivered_queries = [f'deliveredto:{addr}' for addr in PAYMENT_INBOXES]
         address_filter = ' OR '.join(sender_queries + recipient_queries + delivered_queries)
         
-        return f'({address_filter}) after:{date_str}'
+        return f'({address_filter}) after:{since_ts}'
     
     def fetch_emails(self, since_hours: int = 1, max_results: int = 50) -> List[dict]:
         """

@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import (
-    Column, String, Boolean, Numeric, Text, DateTime, 
-    ForeignKey, Enum, LargeBinary
+    Column, String, Boolean, Numeric, Text, DateTime,
+    ForeignKey, Enum, LargeBinary, Index, func
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
@@ -159,7 +159,8 @@ class Alias(Base):
     driver = relationship("Driver", back_populates="aliases")
 
     __table_args__ = (
-        # Unique constraint on type + value
+        # Enforce case-insensitive uniqueness for alias matching.
+        Index("uq_aliases_type_lower_value", "alias_type", func.lower(alias_value), unique=True),
         {"sqlite_autoincrement": True},
     )
 

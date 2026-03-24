@@ -66,7 +66,11 @@ export default function ApplicationDetail() {
         setSubmitting(true);
         try {
             // Update status
-            await api.updateApplicationStatus(application.id, modalAction);
+            await api.updateApplicationStatus(
+                application.id,
+                modalAction,
+                message.trim() || undefined,
+            );
 
             // Send SMS if there's a message and phone number
             const formData = application.form_data as Record<string, any>;

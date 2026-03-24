@@ -382,9 +382,12 @@ def update_vehicle_assignment(
         vehicle = _get_or_create_vehicle(db, request.license_plate)
         assignment.vehicle_id = vehicle.id
 
-    if request.start_at is not None:
+    provided_fields = request.model_fields_set
+    if "start_at" in provided_fields:
+        if request.start_at is None:
+            raise HTTPException(status_code=400, detail="start_at cannot be null")
         assignment.start_at = _to_utc_naive(request.start_at)
-    if request.end_at is not None:
+    if "end_at" in provided_fields:
         assignment.end_at = _to_utc_naive(request.end_at)
 
     if assignment.end_at and assignment.end_at < assignment.start_at:
