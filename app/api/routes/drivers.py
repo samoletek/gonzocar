@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user, get_db
 from app.models import (
+    Application,
     Alias,
     AliasType,
     BillingStatus,
@@ -178,7 +179,7 @@ def list_drivers(
     if billing_active is not None:
         query = query.filter(Driver.billing_active == billing_active)
 
-    drivers = query.offset(skip).limit(limit).all()
+    drivers = query.order_by(Driver.created_at.desc(), Driver.updated_at.desc()).offset(skip).limit(limit).all()
     return [_serialize_driver(driver, balance=_calculate_balance(db, driver.id)) for driver in drivers]
 
 
@@ -388,8 +389,6 @@ def get_driver(
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
 
-    from app.models import Application
-
     application = db.query(Application).filter(
         Application.driver_id == driver_id
     ).order_by(Application.created_at.desc()).first()
@@ -410,6 +409,7 @@ def update_driver(
         raise HTTPException(status_code=404, detail="Driver not found")
 
     update_data = request.model_dump(exclude_unset=True)
+    application_info_update = update_data.pop("application_info", None) if "application_info" in update_data else None
 
     if "billing_status" in update_data:
         requested_status = update_data["billing_status"]
@@ -441,6 +441,15 @@ def update_driver(
             setattr(driver, field, _to_utc_naive(value))
         else:
             setattr(driver, field, value)
+
+    if application_info_update is not None:
+        if not isinstance(application_info_update, dict):
+            raise HTTPException(status_code=400, detail="application_info must be an object")
+        application = db.query(Application).filter(
+            Application.driver_id == driver_id
+        ).order_by(Application.created_at.desc()).first()
+        if application:
+            application.form_data = application_info_update
 
     db.commit()
     db.refresh(driver)

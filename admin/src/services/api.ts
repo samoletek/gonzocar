@@ -324,13 +324,46 @@ class ApiService {
             ? `${API_URL}/applications?status_filter=${encodeURIComponent(statusFilter)}`
             : `${API_URL}/applications`;
         const response = await fetch(url, { headers: this.headers() });
-        if (!response.ok) throw new Error("Failed to fetch applications");
+        if (!response.ok) throw await this.parseError(response, "Failed to fetch applications");
+        return response.json();
+    }
+
+    async getApplicationsPage(options?: {
+        statusFilter?: string;
+        page?: number;
+        pageSize?: number;
+        excludeLinkedDrivers?: boolean;
+    }) {
+        const params = new URLSearchParams();
+        params.set("include_meta", "true");
+        params.set("page", String(options?.page ?? 1));
+        params.set("page_size", String(options?.pageSize ?? 20));
+        if (options?.statusFilter) {
+            params.set("status_filter", options.statusFilter);
+        }
+        if (options?.excludeLinkedDrivers) {
+            params.set("exclude_linked_drivers", "true");
+        }
+
+        const response = await fetch(`${API_URL}/applications?${params.toString()}`, {
+            headers: this.headers(),
+        });
+        if (!response.ok) throw await this.parseError(response, "Failed to fetch applications");
+        return response.json();
+    }
+
+    async backfillApplicationDrivers(limit: number = 200) {
+        const response = await fetch(`${API_URL}/applications/reconcile/drivers?limit=${limit}`, {
+            method: "POST",
+            headers: this.headers(),
+        });
+        if (!response.ok) throw await this.parseError(response, "Failed to reconcile approved applications");
         return response.json();
     }
 
     async getApplication(id: string) {
         const response = await fetch(`${API_URL}/applications/${id}`, { headers: this.headers() });
-        if (!response.ok) throw new Error("Failed to fetch application");
+        if (!response.ok) throw await this.parseError(response, "Failed to fetch application");
         return response.json();
     }
 
@@ -340,7 +373,7 @@ class ApiService {
             headers: this.headers(),
             body: JSON.stringify({ status, message }),
         });
-        if (!response.ok) throw new Error("Failed to update status");
+        if (!response.ok) throw await this.parseError(response, "Failed to update status");
         return response.json();
     }
 
@@ -350,7 +383,7 @@ class ApiService {
             headers: this.headers(),
             body: JSON.stringify({ content }),
         });
-        if (!response.ok) throw new Error("Failed to add comment");
+        if (!response.ok) throw await this.parseError(response, "Failed to add comment");
         return response.json();
     }
 

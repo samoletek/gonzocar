@@ -65,6 +65,7 @@ class DriverUpdate(BaseModel):
     deposit_posted: Optional[float] = None
     deposit_updated_at: Optional[datetime] = None
     terminated_at: Optional[datetime] = None
+    application_info: Optional[dict] = None
 
 
 class DriverResponse(DriverBase):

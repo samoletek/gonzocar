@@ -81,6 +81,29 @@ interface AssignmentForm {
     end_at: string;
 }
 
+function isFileLikeField(key: string): boolean {
+    const normalized = key.toLowerCase();
+    return (
+        normalized.includes("image-upload")
+        || normalized.includes("upload")
+        || normalized.includes("file")
+        || normalized.includes("document")
+        || normalized.includes("attachment")
+        || normalized.includes("photo")
+    );
+}
+
+function stringifyProfileValue(value: unknown): string {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    try {
+        return JSON.stringify(value, null, 2);
+    } catch {
+        return String(value);
+    }
+}
+
 function toDateTimeLocal(value?: string | null): string {
     if (!value) return "";
     const date = new Date(value);
@@ -139,6 +162,9 @@ export default function DriverDetail() {
 
     const [swapPlate, setSwapPlate] = useState("");
     const [swapStartAt, setSwapStartAt] = useState(toDateTimeLocal(new Date().toISOString()));
+    const [isEditingApplicationInfo, setIsEditingApplicationInfo] = useState(false);
+    const [applicationInfoDraft, setApplicationInfoDraft] = useState<Record<string, string>>({});
+    const [applicationInfoError, setApplicationInfoError] = useState("");
 
     useEffect(() => {
         if (id) loadData();
@@ -162,6 +188,15 @@ export default function DriverDetail() {
             setAliases(aliasData);
             setAssignments(assignmentData);
             setPortalLink(portalData);
+            setIsEditingApplicationInfo(false);
+            setApplicationInfoError("");
+
+            const draft: Record<string, string> = {};
+            const rawInfo = (driverData.application_info ?? {}) as Record<string, unknown>;
+            Object.entries(rawInfo).forEach(([key, value]) => {
+                draft[key] = stringifyProfileValue(value);
+            });
+            setApplicationInfoDraft(draft);
 
             setProfileForm({
                 first_name: driverData.first_name ?? "",
@@ -430,6 +465,56 @@ export default function DriverDetail() {
             } else {
                 console.error("Failed to swap vehicle:", error);
             }
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function handleSaveApplicationInfo() {
+        if (!id || !driver?.application_info) return;
+        setBusy(true);
+        setApplicationInfoError("");
+        try {
+            const nextInfo: Record<string, unknown> = { ...(driver.application_info as Record<string, unknown>) };
+            for (const [key, originalValue] of Object.entries(nextInfo)) {
+                if (HIDDEN_FIELDS.has(key) || isFileLikeField(key)) {
+                    continue;
+                }
+
+                const rawValue = applicationInfoDraft[key] ?? stringifyProfileValue(originalValue);
+                if (typeof originalValue === "number") {
+                    const parsed = Number(rawValue);
+                    if (Number.isNaN(parsed)) {
+                        setApplicationInfoError(`Field "${getFieldLabel(key)}" must be a number.`);
+                        setBusy(false);
+                        return;
+                    }
+                    nextInfo[key] = parsed;
+                } else if (typeof originalValue === "boolean") {
+                    const normalized = rawValue.trim().toLowerCase();
+                    nextInfo[key] = normalized === "true" || normalized === "1" || normalized === "yes";
+                } else if (typeof originalValue === "object" && originalValue !== null) {
+                    if (!rawValue.trim()) {
+                        nextInfo[key] = null;
+                    } else {
+                        try {
+                            nextInfo[key] = JSON.parse(rawValue);
+                        } catch {
+                            setApplicationInfoError(`Field "${getFieldLabel(key)}" must contain valid JSON.`);
+                            setBusy(false);
+                            return;
+                        }
+                    }
+                } else {
+                    nextInfo[key] = rawValue;
+                }
+            }
+
+            await api.updateDriver(id, { application_info: nextInfo });
+            await loadData();
+            setIsEditingApplicationInfo(false);
+        } catch (error) {
+            console.error("Failed to update application info:", error);
         } finally {
             setBusy(false);
         }
@@ -762,21 +847,114 @@ export default function DriverDetail() {
                         marginBottom: "var(--space-4)",
                     }}
                 >
-                    <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1rem", color: "var(--dark-gray)", marginBottom: "var(--space-2)" }}>
-                        Full Profile (Application Data)
-                    </h3>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
-                        {sortFormEntries(Object.entries(driver.application_info).filter(([key]) => !HIDDEN_FIELDS.has(key))).map(([key, value]) => (
-                            <div key={key}>
-                                <div style={{ fontSize: "0.75rem", opacity: 0.6, textTransform: "uppercase", marginBottom: "4px" }}>
-                                    {getFieldLabel(key)}
-                                </div>
-                                <div style={{ fontWeight: 500 }}>
-                                    {typeof value === "object" && value !== null ? JSON.stringify(value) : String(value ?? "-")}
-                                </div>
-                            </div>
-                        ))}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-2)" }}>
+                        <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1rem", color: "var(--dark-gray)" }}>
+                            Full Profile (Application Data)
+                        </h3>
+                        <button
+                            onClick={() => {
+                                setIsEditingApplicationInfo((current) => !current);
+                                setApplicationInfoError("");
+                            }}
+                            style={{
+                                padding: "4px 10px",
+                                border: "1px solid var(--medium-gray)",
+                                borderRadius: "var(--radius-small)",
+                                background: "var(--light-gray)",
+                                color: "var(--dark-gray)",
+                                cursor: "pointer",
+                            }}
+                        >
+                            {isEditingApplicationInfo ? "Cancel" : "Edit"}
+                        </button>
                     </div>
+
+                    {applicationInfoError && (
+                        <div
+                            style={{
+                                marginBottom: "var(--space-2)",
+                                color: "var(--error-red)",
+                                fontSize: "0.875rem",
+                            }}
+                        >
+                            {applicationInfoError}
+                        </div>
+                    )}
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
+                        {sortFormEntries(Object.entries(driver.application_info).filter(([key]) => !HIDDEN_FIELDS.has(key))).map(([key, value]) => {
+                            const isFileField = isFileLikeField(key);
+                            const draftValue = applicationInfoDraft[key] ?? stringifyProfileValue(value);
+                            const useTextarea = typeof value === "object" || draftValue.length > 120 || draftValue.includes("\n");
+
+                            return (
+                                <div key={key}>
+                                    <div style={{ fontSize: "0.75rem", opacity: 0.6, textTransform: "uppercase", marginBottom: "4px" }}>
+                                        {getFieldLabel(key)}
+                                    </div>
+                                    {isEditingApplicationInfo && !isFileField ? (
+                                        useTextarea ? (
+                                            <textarea
+                                                style={{ ...inputStyle, minHeight: "84px", fontFamily: typeof value === "object" ? "monospace" : "inherit" }}
+                                                value={draftValue}
+                                                onChange={(e) =>
+                                                    setApplicationInfoDraft((prev) => ({
+                                                        ...prev,
+                                                        [key]: e.target.value,
+                                                    }))
+                                                }
+                                            />
+                                        ) : (
+                                            <input
+                                                style={inputStyle}
+                                                value={draftValue}
+                                                onChange={(e) =>
+                                                    setApplicationInfoDraft((prev) => ({
+                                                        ...prev,
+                                                        [key]: e.target.value,
+                                                    }))
+                                                }
+                                            />
+                                        )
+                                    ) : (
+                                        <div style={{ fontWeight: 500, wordBreak: "break-word" }}>
+                                            {typeof value === "string" && value.startsWith("http") ? (
+                                                <a href={value} target="_blank" rel="noreferrer" style={{ color: "var(--primary-blue)" }}>
+                                                    {value}
+                                                </a>
+                                            ) : typeof value === "object" && value !== null ? (
+                                                <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: "0.8rem" }}>
+                                                    {JSON.stringify(value, null, 2)}
+                                                </pre>
+                                            ) : (
+                                                String(value ?? "-")
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                    {isEditingApplicationInfo && (
+                        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "var(--space-2)" }}>
+                            <button
+                                disabled={busy}
+                                onClick={handleSaveApplicationInfo}
+                                style={{
+                                    padding: "8px 14px",
+                                    background: "var(--primary-blue)",
+                                    border: "none",
+                                    borderRadius: "var(--radius-small)",
+                                    color: "var(--white)",
+                                    fontWeight: 600,
+                                    cursor: busy ? "not-allowed" : "pointer",
+                                    opacity: busy ? 0.7 : 1,
+                                }}
+                            >
+                                Save Application Data
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
 

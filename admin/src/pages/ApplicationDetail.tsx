@@ -14,6 +14,7 @@ interface Comment {
 interface Application {
     id: string;
     status: string;
+    driver_id?: string | null;
     form_data: Record<string, unknown>;
     comments: Comment[];
     created_at: string;
@@ -141,6 +142,24 @@ export default function ApplicationDetail() {
                 >
                     Back to Applications
                 </button>
+                {application.driver_id && (
+                    <button
+                        onClick={() => navigate(`/drivers/${application.driver_id}`)}
+                        style={{
+                            padding: 'var(--space-1) var(--space-2)',
+                            background: '#D4EDDA',
+                            border: '1px solid #9ad7a0',
+                            borderRadius: 'var(--radius-small)',
+                            color: '#155724',
+                            marginBottom: 'var(--space-2)',
+                            marginLeft: '8px',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                        }}
+                    >
+                        Open Driver Profile
+                    </button>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
                         <h1 style={{
