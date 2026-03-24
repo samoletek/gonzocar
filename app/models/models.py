@@ -16,6 +16,12 @@ class BillingType(str, enum.Enum):
     weekly = "weekly"
 
 
+class BillingStatus(str, enum.Enum):
+    active = "active"
+    paused = "paused"
+    terminated = "terminated"
+
+
 class ApplicationStatus(str, enum.Enum):
     pending = "pending"
     approved = "approved"
@@ -65,6 +71,12 @@ class Driver(Base):
     billing_type = Column(Enum(BillingType), default=BillingType.daily)
     billing_rate = Column(Numeric(10, 2), nullable=False)
     billing_active = Column(Boolean, default=True)
+    billing_status = Column(Enum(BillingStatus), default=BillingStatus.active, nullable=False)
+    deposit_required = Column(Numeric(10, 2), default=0)
+    deposit_posted = Column(Numeric(10, 2), default=0)
+    deposit_updated_at = Column(DateTime, nullable=True)
+    terminated_at = Column(DateTime, nullable=True)
+    portal_token = Column(String(64), unique=True, nullable=False, default=lambda: uuid.uuid4().hex)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -74,6 +86,35 @@ class Driver(Base):
     payments = relationship("PaymentRaw", back_populates="driver")
     ledger_entries = relationship("Ledger", back_populates="driver")
     sms_logs = relationship("SmsLog", back_populates="driver")
+    vehicle_assignments = relationship("DriverVehicleAssignment", back_populates="driver", cascade="all, delete-orphan")
+
+
+class Vehicle(Base):
+    __tablename__ = "vehicles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    license_plate = Column(String(20), unique=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    assignments = relationship("DriverVehicleAssignment", back_populates="vehicle", cascade="all, delete-orphan")
+
+
+class DriverVehicleAssignment(Base):
+    __tablename__ = "driver_vehicle_assignments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    driver_id = Column(UUID(as_uuid=True), ForeignKey("drivers.id"), nullable=False)
+    vehicle_id = Column(UUID(as_uuid=True), ForeignKey("vehicles.id"), nullable=False)
+    start_at = Column(DateTime, nullable=False)
+    end_at = Column(DateTime, nullable=True)
+    previous_assignment_id = Column(UUID(as_uuid=True), ForeignKey("driver_vehicle_assignments.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    driver = relationship("Driver", back_populates="vehicle_assignments")
+    vehicle = relationship("Vehicle", back_populates="assignments")
+    previous_assignment = relationship("DriverVehicleAssignment", remote_side=[id], uselist=False)
 
 
 class Application(Base):
@@ -152,6 +193,8 @@ class Ledger(Base):
     amount = Column(Numeric(10, 2), nullable=False)
     description = Column(String(255), nullable=True)
     reference_id = Column(UUID(as_uuid=True), nullable=True)
+    entry_source = Column(String(50), nullable=False, default="system")
+    reversal_of_id = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships

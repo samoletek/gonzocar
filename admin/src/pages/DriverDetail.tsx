@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import api from '../services/api';
-import { getFieldLabel, sortFormEntries, HIDDEN_FIELDS } from '../utils/formFields';
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+
+import api from "../services/api";
+import { getFieldLabel, HIDDEN_FIELDS, sortFormEntries } from "../utils/formFields";
 
 interface Driver {
     id: string;
@@ -12,16 +13,24 @@ interface Driver {
     billing_type: string;
     billing_rate: number;
     billing_active: boolean;
+    billing_status: "active" | "paused" | "terminated";
+    deposit_required: number;
+    deposit_posted: number;
+    deposit_updated_at: string | null;
+    terminated_at: string | null;
     balance: number;
     created_at: string;
-    application_info?: Record<string, any>;
+    portal_token?: string;
+    application_info?: Record<string, unknown>;
 }
 
 interface LedgerEntry {
     id: string;
-    type: string;
+    type: "credit" | "debit";
     amount: number;
     description: string;
+    entry_source?: string;
+    reversal_of_id?: string | null;
     created_at: string;
 }
 
@@ -31,348 +40,806 @@ interface Alias {
     alias_value: string;
 }
 
+interface VehicleAssignment {
+    id: string;
+    driver_id: string;
+    driver_name: string;
+    license_plate: string;
+    start_at: string;
+    end_at: string | null;
+    previous_assignment_id: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+interface PortalLink {
+    token: string;
+    path: string;
+}
+
+interface ProfileForm {
+    first_name: string;
+    last_name: string;
+    email: string;
+    phone: string;
+    billing_type: string;
+    billing_rate: string;
+    deposit_required: string;
+    deposit_posted: string;
+}
+
+interface ManualEntryForm {
+    entry_type: "charge" | "credit";
+    amount: string;
+    date: string;
+    notes: string;
+}
+
+interface AssignmentForm {
+    license_plate: string;
+    start_at: string;
+    end_at: string;
+}
+
+function toDateTimeLocal(value?: string | null): string {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const timezoneOffset = date.getTimezoneOffset() * 60000;
+    return new Date(date.getTime() - timezoneOffset).toISOString().slice(0, 16);
+}
+
+function toIsoOrUndefined(value: string): string | undefined {
+    if (!value) return undefined;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return undefined;
+    return date.toISOString();
+}
+
 export default function DriverDetail() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
+
     const [driver, setDriver] = useState<Driver | null>(null);
     const [ledger, setLedger] = useState<LedgerEntry[]>([]);
     const [aliases, setAliases] = useState<Alias[]>([]);
+    const [assignments, setAssignments] = useState<VehicleAssignment[]>([]);
+    const [portalLink, setPortalLink] = useState<PortalLink | null>(null);
     const [loading, setLoading] = useState(true);
-    const [updating, setUpdating] = useState(false);
+    const [busy, setBusy] = useState(false);
+
+    const [isEditingProfile, setIsEditingProfile] = useState(false);
+    const [profileForm, setProfileForm] = useState<ProfileForm>({
+        first_name: "",
+        last_name: "",
+        email: "",
+        phone: "",
+        billing_type: "daily",
+        billing_rate: "",
+        deposit_required: "0",
+        deposit_posted: "0",
+    });
+
+    const [manualForm, setManualForm] = useState<ManualEntryForm>({
+        entry_type: "charge",
+        amount: "",
+        date: "",
+        notes: "",
+    });
+
+    const [newAliasType, setNewAliasType] = useState("zelle");
+    const [newAliasValue, setNewAliasValue] = useState("");
+
+    const [assignmentForm, setAssignmentForm] = useState<AssignmentForm>({
+        license_plate: "",
+        start_at: toDateTimeLocal(new Date().toISOString()),
+        end_at: "",
+    });
+    const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
+
+    const [swapPlate, setSwapPlate] = useState("");
+    const [swapStartAt, setSwapStartAt] = useState(toDateTimeLocal(new Date().toISOString()));
 
     useEffect(() => {
         if (id) loadData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
 
     async function loadData() {
+        if (!id) return;
         try {
-            const [driverData, ledgerData, aliasData] = await Promise.all([
-                api.getDriver(id!),
-                api.getDriverLedger(id!),
-                api.getDriverAliases(id!),
+            setLoading(true);
+            const [driverData, ledgerData, aliasData, assignmentData, portalData] = await Promise.all([
+                api.getDriver(id),
+                api.getDriverLedger(id),
+                api.getDriverAliases(id),
+                api.getDriverVehicleAssignments(id),
+                api.getDriverPortalLink(id),
             ]);
+
             setDriver(driverData);
             setLedger(ledgerData);
             setAliases(aliasData);
+            setAssignments(assignmentData);
+            setPortalLink(portalData);
+
+            setProfileForm({
+                first_name: driverData.first_name ?? "",
+                last_name: driverData.last_name ?? "",
+                email: driverData.email ?? "",
+                phone: driverData.phone ?? "",
+                billing_type: driverData.billing_type ?? "daily",
+                billing_rate: String(driverData.billing_rate ?? ""),
+                deposit_required: String(driverData.deposit_required ?? 0),
+                deposit_posted: String(driverData.deposit_posted ?? 0),
+            });
         } catch (error) {
-            console.error('Failed to load driver:', error);
+            console.error("Failed to load driver details:", error);
         } finally {
             setLoading(false);
         }
     }
 
-    async function toggleBilling() {
-        if (!driver) return;
-        setUpdating(true);
+    const portalUrl = useMemo(() => {
+        if (!portalLink?.path) return "";
+        return `${window.location.origin}${portalLink.path}`;
+    }, [portalLink]);
+
+    async function handleProfileSave() {
+        if (!driver || !id) return;
+        setBusy(true);
         try {
-            await api.updateDriverBilling(driver.id, !driver.billing_active);
-            loadData();
+            await api.updateDriver(id, {
+                first_name: profileForm.first_name.trim(),
+                last_name: profileForm.last_name.trim(),
+                email: profileForm.email.trim(),
+                phone: profileForm.phone.trim(),
+                billing_type: profileForm.billing_type,
+                billing_rate: Number(profileForm.billing_rate || 0),
+                deposit_required: Number(profileForm.deposit_required || 0),
+                deposit_posted: Number(profileForm.deposit_posted || 0),
+                deposit_updated_at: new Date().toISOString(),
+            });
+            setIsEditingProfile(false);
+            await loadData();
         } catch (error) {
-            console.error('Failed to update billing:', error);
+            console.error("Failed to update driver profile:", error);
         } finally {
-            setUpdating(false);
+            setBusy(false);
+        }
+    }
+
+    async function handleBillingStatusChange(status: "active" | "paused" | "terminated") {
+        if (!id) return;
+        setBusy(true);
+        try {
+            await api.updateDriverBillingStatus(id, status);
+            await loadData();
+        } catch (error) {
+            console.error("Failed to update billing status:", error);
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function handleManualLedgerSubmit(e: React.FormEvent) {
+        e.preventDefault();
+        if (!id || !manualForm.amount) return;
+        setBusy(true);
+        try {
+            await api.createManualLedgerEntry(id, {
+                entry_type: manualForm.entry_type,
+                amount: Number(manualForm.amount),
+                date: toIsoOrUndefined(manualForm.date),
+                notes: manualForm.notes.trim() || undefined,
+            });
+            setManualForm({
+                entry_type: "charge",
+                amount: "",
+                date: "",
+                notes: "",
+            });
+            await loadData();
+        } catch (error) {
+            const ext = error as Error & { status?: number; data?: any };
+            if (ext.status === 409) {
+                const proceed = window.confirm(
+                    `${ext.data?.detail?.message || "Entry overlaps existing record"}. Save anyway?`
+                );
+                if (proceed) {
+                    try {
+                        await api.createManualLedgerEntry(id, {
+                            entry_type: manualForm.entry_type,
+                            amount: Number(manualForm.amount),
+                            date: toIsoOrUndefined(manualForm.date),
+                            notes: manualForm.notes.trim() || undefined,
+                            acknowledge_overlap: true,
+                        });
+                        setManualForm({
+                            entry_type: "charge",
+                            amount: "",
+                            date: "",
+                            notes: "",
+                        });
+                        await loadData();
+                    } catch (secondError) {
+                        console.error("Failed to save manual ledger entry after confirmation:", secondError);
+                    }
+                }
+            } else {
+                console.error("Failed to create manual ledger entry:", error);
+            }
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function handleCancelLedgerEntry(entryId: string) {
+        if (!id) return;
+        const proceed = window.confirm("Cancel this ledger entry by creating a reversal?");
+        if (!proceed) return;
+        setBusy(true);
+        try {
+            await api.cancelLedgerEntry(id, entryId, "Canceled by staff");
+            await loadData();
+        } catch (error) {
+            console.error("Failed to cancel ledger entry:", error);
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function handleAddAlias(e: React.FormEvent) {
+        e.preventDefault();
+        if (!id || !newAliasValue.trim()) return;
+        setBusy(true);
+        try {
+            await api.createDriverAlias(id, {
+                alias_type: newAliasType,
+                alias_value: newAliasValue.trim(),
+            });
+            setNewAliasValue("");
+            await loadData();
+        } catch (error) {
+            console.error("Failed to create alias:", error);
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function handleDeleteAlias(aliasId: string) {
+        if (!id) return;
+        setBusy(true);
+        try {
+            await api.deleteDriverAlias(id, aliasId);
+            await loadData();
+        } catch (error) {
+            console.error("Failed to delete alias:", error);
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function handleAssignmentSubmit(e: React.FormEvent) {
+        e.preventDefault();
+        if (!id || !assignmentForm.license_plate || !assignmentForm.start_at) return;
+        setBusy(true);
+
+        const payload = {
+            license_plate: assignmentForm.license_plate.trim(),
+            start_at: toIsoOrUndefined(assignmentForm.start_at),
+            end_at: toIsoOrUndefined(assignmentForm.end_at),
+        };
+
+        try {
+            if (editingAssignmentId) {
+                await api.updateVehicleAssignment(editingAssignmentId, payload);
+            } else {
+                await api.createVehicleAssignment({
+                    driver_id: id,
+                    ...payload,
+                });
+            }
+            setAssignmentForm({
+                license_plate: "",
+                start_at: toDateTimeLocal(new Date().toISOString()),
+                end_at: "",
+            });
+            setEditingAssignmentId(null);
+            await loadData();
+        } catch (error) {
+            const ext = error as Error & { status?: number; data?: any };
+            if (ext.status === 409) {
+                const proceed = window.confirm(
+                    `${ext.data?.detail?.message || "Assignment overlaps existing record"}. Save anyway?`
+                );
+                if (proceed) {
+                    try {
+                        if (editingAssignmentId) {
+                            await api.updateVehicleAssignment(editingAssignmentId, {
+                                ...payload,
+                                acknowledge_overlap: true,
+                            });
+                        } else {
+                            await api.createVehicleAssignment({
+                                driver_id: id,
+                                ...payload,
+                                acknowledge_overlap: true,
+                            });
+                        }
+                        setAssignmentForm({
+                            license_plate: "",
+                            start_at: toDateTimeLocal(new Date().toISOString()),
+                            end_at: "",
+                        });
+                        setEditingAssignmentId(null);
+                        await loadData();
+                    } catch (secondError) {
+                        console.error("Failed to save assignment after confirmation:", secondError);
+                    }
+                }
+            } else {
+                console.error("Failed to save assignment:", error);
+            }
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    function startEditingAssignment(item: VehicleAssignment) {
+        setEditingAssignmentId(item.id);
+        setAssignmentForm({
+            license_plate: item.license_plate,
+            start_at: toDateTimeLocal(item.start_at),
+            end_at: toDateTimeLocal(item.end_at),
+        });
+    }
+
+    async function handleSwapVehicle(e: React.FormEvent) {
+        e.preventDefault();
+        if (!id || !swapPlate.trim()) return;
+        setBusy(true);
+        try {
+            await api.swapVehicle(id, {
+                new_license_plate: swapPlate.trim(),
+                start_at: toIsoOrUndefined(swapStartAt),
+            });
+            setSwapPlate("");
+            setSwapStartAt(toDateTimeLocal(new Date().toISOString()));
+            await loadData();
+        } catch (error) {
+            const ext = error as Error & { status?: number; data?: any };
+            if (ext.status === 409) {
+                const proceed = window.confirm(
+                    `${ext.data?.detail?.message || "Swap overlaps existing record"}. Save anyway?`
+                );
+                if (proceed) {
+                    try {
+                        await api.swapVehicle(id, {
+                            new_license_plate: swapPlate.trim(),
+                            start_at: toIsoOrUndefined(swapStartAt),
+                            acknowledge_overlap: true,
+                        });
+                        setSwapPlate("");
+                        setSwapStartAt(toDateTimeLocal(new Date().toISOString()));
+                        await loadData();
+                    } catch (secondError) {
+                        console.error("Failed to swap vehicle after confirmation:", secondError);
+                    }
+                }
+            } else {
+                console.error("Failed to swap vehicle:", error);
+            }
+        } finally {
+            setBusy(false);
         }
     }
 
     if (loading) {
-        return <div style={{ padding: 'var(--space-4)', color: 'var(--dark-gray)' }}>Loading driver...</div>;
+        return <div style={{ padding: "var(--space-4)", color: "var(--dark-gray)" }}>Loading driver...</div>;
     }
 
     if (!driver) {
-        return <div style={{ padding: 'var(--space-4)', color: 'var(--dark-gray)' }}>Driver not found</div>;
+        return <div style={{ padding: "var(--space-4)", color: "var(--dark-gray)" }}>Driver not found</div>;
     }
 
+    const renderBillingBadge = (statusValue: Driver["billing_status"]) => {
+        const map: Record<Driver["billing_status"], { bg: string; color: string; label: string }> = {
+            active: { bg: "#D4EDDA", color: "#155724", label: "Active" },
+            paused: { bg: "#FFF3CD", color: "#856404", label: "Paused" },
+            terminated: { bg: "#F8D7DA", color: "#721C24", label: "Terminated" },
+        };
+        const style = map[statusValue];
+        return (
+            <span
+                style={{
+                    padding: "4px 8px",
+                    background: style.bg,
+                    color: style.color,
+                    borderRadius: "var(--radius-small)",
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                }}
+            >
+                {style.label}
+            </span>
+        );
+    };
+
+    const inputStyle: React.CSSProperties = {
+        width: "100%",
+        padding: "8px 10px",
+        border: "1px solid var(--medium-gray)",
+        borderRadius: "var(--radius-small)",
+        fontSize: "0.875rem",
+        color: "var(--dark-gray)",
+    };
+
     return (
-        <div style={{ padding: 'var(--space-4)' }}>
-            {/* Header */}
-            <div style={{ marginBottom: 'var(--space-4)' }}>
+        <div style={{ padding: "var(--space-4)" }}>
+            <div style={{ marginBottom: "var(--space-4)" }}>
                 <button
-                    onClick={() => navigate('/drivers')}
+                    onClick={() => navigate("/drivers")}
                     style={{
-                        padding: 'var(--space-1) var(--space-2)',
-                        background: 'var(--light-gray)',
-                        border: '1px solid var(--medium-gray)',
-                        borderRadius: 'var(--radius-small)',
-                        color: 'var(--dark-gray)',
-                        marginBottom: 'var(--space-2)',
-                        cursor: 'pointer',
+                        padding: "var(--space-1) var(--space-2)",
+                        background: "var(--light-gray)",
+                        border: "1px solid var(--medium-gray)",
+                        borderRadius: "var(--radius-small)",
+                        color: "var(--dark-gray)",
+                        marginBottom: "var(--space-2)",
+                        cursor: "pointer",
                     }}
                 >
                     Back to Drivers
                 </button>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "var(--space-3)" }}>
                     <div>
-                        <h1 style={{
-                            fontFamily: 'var(--font-heading)',
-                            fontSize: '1.75rem',
-                            color: 'var(--dark-gray)',
-                            marginBottom: 'var(--space-1)',
-                        }}>
+                        <h1
+                            style={{
+                                fontFamily: "var(--font-heading)",
+                                fontSize: "1.75rem",
+                                color: "var(--dark-gray)",
+                                marginBottom: "var(--space-1)",
+                            }}
+                        >
                             {driver.first_name} {driver.last_name}
                         </h1>
-                        <p style={{ color: 'var(--dark-gray)', opacity: 0.7 }}>
+                        <p style={{ color: "var(--dark-gray)", opacity: 0.7 }}>
                             Driver since {new Date(driver.created_at).toLocaleDateString()}
                         </p>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                        <div style={{
-                            fontSize: '2rem',
-                            fontWeight: 700,
-                            fontFamily: 'var(--font-heading)',
-                            color: (driver.balance || 0) >= 0 ? 'var(--success-green)' : 'var(--error-red)',
-                        }}>
-                            ${driver.balance?.toFixed(2) || '0.00'}
-                        </div>
-                        <div style={{ color: 'var(--dark-gray)', opacity: 0.6, fontSize: '0.875rem' }}>
-                            Current Balance
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Info Cards */}
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 'var(--space-3)',
-                marginBottom: 'var(--space-4)',
-            }}>
-                <div style={{
-                    background: 'var(--white)',
-                    borderRadius: 'var(--radius-standard)',
-                    padding: 'var(--space-3)',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
-                }}>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--dark-gray)', opacity: 0.6, marginBottom: '8px' }}>
-                        Contact
-                    </div>
-                    <div style={{ color: 'var(--dark-gray)', fontWeight: 500 }}>{driver.email}</div>
-                    <div style={{ color: 'var(--dark-gray)', opacity: 0.7 }}>{driver.phone}</div>
-                </div>
-                <div style={{
-                    background: 'var(--white)',
-                    borderRadius: 'var(--radius-standard)',
-                    padding: 'var(--space-3)',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
-                }}>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--dark-gray)', opacity: 0.6, marginBottom: '8px' }}>
-                        Billing Rate
-                    </div>
-                    <div style={{ color: 'var(--dark-gray)', fontSize: '1.25rem', fontWeight: 600 }}>
-                        ${driver.billing_rate} / {driver.billing_type}
-                    </div>
-                </div>
-                <div style={{
-                    background: 'var(--white)',
-                    borderRadius: 'var(--radius-standard)',
-                    padding: 'var(--space-3)',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
-                }}>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--dark-gray)', opacity: 0.6, marginBottom: '8px' }}>
-                        Billing Status
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                        <span style={{
-                            padding: '4px 8px',
-                            background: driver.billing_active ? '#D4EDDA' : '#E2E3E5',
-                            color: driver.billing_active ? '#155724' : '#383D41',
-                            borderRadius: 'var(--radius-small)',
-                            fontWeight: 500,
-                            fontSize: '0.875rem',
-                        }}>
-                            {driver.billing_active ? 'Active' : 'Paused'}
-                        </span>
-                        <button
-                            onClick={toggleBilling}
-                            disabled={updating}
+                    <div style={{ textAlign: "right" }}>
+                        <div
                             style={{
-                                padding: '4px 12px',
-                                background: 'var(--light-gray)',
-                                border: '1px solid var(--medium-gray)',
-                                borderRadius: 'var(--radius-small)',
-                                color: 'var(--dark-gray)',
-                                fontSize: '0.75rem',
-                                cursor: updating ? 'not-allowed' : 'pointer',
-                                opacity: updating ? 0.6 : 1,
+                                fontSize: "2rem",
+                                fontWeight: 700,
+                                fontFamily: "var(--font-heading)",
+                                color: (driver.balance || 0) >= 0 ? "var(--success-green)" : "var(--error-red)",
                             }}
                         >
-                            {driver.billing_active ? 'Pause' : 'Resume'}
-                        </button>
+                            ${driver.balance?.toFixed(2) || "0.00"}
+                        </div>
+                        <div style={{ color: "var(--dark-gray)", opacity: 0.6, fontSize: "0.875rem" }}>Current Balance</div>
                     </div>
                 </div>
             </div>
 
-            {/* Full Profile (from Application) */}
-            {driver.application_info && Object.keys(driver.application_info).length > 0 && (
-                <div style={{
-                    background: 'var(--white)',
-                    borderRadius: 'var(--radius-standard)',
-                    padding: 'var(--space-4)',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
-                    marginBottom: 'var(--space-4)',
-                }}>
-                    <h3 style={{
-                        fontFamily: 'var(--font-heading)',
-                        fontSize: '1.125rem',
-                        color: 'var(--dark-gray)',
-                        marginBottom: 'var(--space-3)',
-                    }}>
-                        Full Profile
-                    </h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
-                        {sortFormEntries(Object.entries(driver.application_info).filter(([key]) => !HIDDEN_FIELDS.has(key))).map(([key, value]) => {
-                            // Smart Value Formatting
-                            let displayValue: React.ReactNode = '-';
-                            let stringValue = '';
-                            let isSpecialObject = false;
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--space-4)", marginBottom: "var(--space-4)" }}>
+                <div
+                    style={{
+                        background: "var(--white)",
+                        borderRadius: "var(--radius-standard)",
+                        padding: "var(--space-3)",
+                        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.08)",
+                    }}
+                >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-2)" }}>
+                        <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1rem", color: "var(--dark-gray)" }}>Driver Profile</h3>
+                        <button
+                            onClick={() => setIsEditingProfile((v) => !v)}
+                            style={{
+                                padding: "4px 10px",
+                                border: "1px solid var(--medium-gray)",
+                                borderRadius: "var(--radius-small)",
+                                background: "var(--light-gray)",
+                                color: "var(--dark-gray)",
+                                cursor: "pointer",
+                            }}
+                        >
+                            {isEditingProfile ? "Cancel" : "Edit"}
+                        </button>
+                    </div>
 
-                            if (value === null || value === undefined || value === '') {
-                                displayValue = '-';
-                                isSpecialObject = true;
-                            } else if (typeof value === 'object') {
-                                const obj = value as Record<string, unknown>;
-
-                                if (Array.isArray(value)) {
-                                    stringValue = value.map(String).join(', ');
-                                }
-                                else if ((obj.first_name || obj.last_name || obj.First_Name || obj.Last_Name)) {
-                                    const first = (obj.first_name || obj.First_Name || obj.first || '') as string;
-                                    const last = (obj.last_name || obj.Last_Name || obj.last || '') as string;
-                                    displayValue = `${first} ${last}`.trim();
-                                    isSpecialObject = true;
-                                }
-                                else if (obj.address_line_1 || obj.city || obj.state || obj.zip) {
-                                    const addr1 = (obj.address_line_1 || '') as string;
-                                    const addr2 = (obj.address_line_2 || '') as string;
-                                    const city = (obj.city || '') as string;
-                                    const state = (obj.state || '') as string;
-                                    const zip = (obj.zip || '') as string;
-                                    displayValue = [addr1, addr2, city, state, zip].filter(Boolean).join(', ');
-                                    isSpecialObject = true;
-                                }
-                                else {
-                                    const values = Object.values(obj).filter(v => typeof v === 'string' || typeof v === 'number');
-                                    if (values.length > 0 && values.length < 5) {
-                                        stringValue = values.join(', ');
-                                    } else {
-                                        stringValue = JSON.stringify(value);
-                                    }
-                                }
-                            } else {
-                                stringValue = String(value);
-                            }
-
-                            if (!isSpecialObject) {
-                                if (stringValue.includes('http')) {
-                                    const urls = stringValue.split(/[\n,\s]+/).map(u => u.trim()).filter(u => u.startsWith('http'));
-                                    if (urls.length > 0) {
-                                        displayValue = (
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                                {urls.map((url, idx) => (
-                                                    <a
-                                                        key={idx}
-                                                        href={url}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        style={{
-                                                            color: 'var(--primary-blue)',
-                                                            textDecoration: 'underline',
-                                                            wordBreak: 'break-all'
-                                                        }}
-                                                        onClick={(e) => e.stopPropagation()}
-                                                    >
-                                                        View Document {urls.length > 1 ? idx + 1 : ''}
-                                                    </a>
-                                                ))}
-                                            </div>
-                                        );
-                                    } else {
-                                        displayValue = stringValue;
-                                    }
-                                } else {
-                                    displayValue = stringValue;
-                                }
-                            }
-
-                            return (
-                                <div key={key}>
-                                    <div style={{
-                                        color: 'var(--dark-gray)',
-                                        opacity: 0.6,
-                                        fontSize: '0.75rem',
-                                        textTransform: 'uppercase',
-                                        marginBottom: '4px',
-                                    }}>
-                                        {getFieldLabel(key)}
-                                    </div>
-                                    <div style={{ color: 'var(--dark-gray)', fontWeight: 500 }}>
-                                        {displayValue}
-                                    </div>
+                    {isEditingProfile ? (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-2)" }}>
+                            <div>
+                                <div style={{ fontSize: "0.75rem", marginBottom: "4px" }}>First Name</div>
+                                <input
+                                    style={inputStyle}
+                                    value={profileForm.first_name}
+                                    onChange={(e) => setProfileForm((prev) => ({ ...prev, first_name: e.target.value }))}
+                                />
+                            </div>
+                            <div>
+                                <div style={{ fontSize: "0.75rem", marginBottom: "4px" }}>Last Name</div>
+                                <input
+                                    style={inputStyle}
+                                    value={profileForm.last_name}
+                                    onChange={(e) => setProfileForm((prev) => ({ ...prev, last_name: e.target.value }))}
+                                />
+                            </div>
+                            <div>
+                                <div style={{ fontSize: "0.75rem", marginBottom: "4px" }}>Email</div>
+                                <input
+                                    style={inputStyle}
+                                    value={profileForm.email}
+                                    onChange={(e) => setProfileForm((prev) => ({ ...prev, email: e.target.value }))}
+                                />
+                            </div>
+                            <div>
+                                <div style={{ fontSize: "0.75rem", marginBottom: "4px" }}>Phone</div>
+                                <input
+                                    style={inputStyle}
+                                    value={profileForm.phone}
+                                    onChange={(e) => setProfileForm((prev) => ({ ...prev, phone: e.target.value }))}
+                                />
+                            </div>
+                            <div>
+                                <div style={{ fontSize: "0.75rem", marginBottom: "4px" }}>Billing Type</div>
+                                <select
+                                    style={inputStyle}
+                                    value={profileForm.billing_type}
+                                    onChange={(e) => setProfileForm((prev) => ({ ...prev, billing_type: e.target.value }))}
+                                >
+                                    <option value="daily">Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                </select>
+                            </div>
+                            <div>
+                                <div style={{ fontSize: "0.75rem", marginBottom: "4px" }}>Billing Rate</div>
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    style={inputStyle}
+                                    value={profileForm.billing_rate}
+                                    onChange={(e) => setProfileForm((prev) => ({ ...prev, billing_rate: e.target.value }))}
+                                />
+                            </div>
+                            <div>
+                                <div style={{ fontSize: "0.75rem", marginBottom: "4px" }}>Deposit Required</div>
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    style={inputStyle}
+                                    value={profileForm.deposit_required}
+                                    onChange={(e) => setProfileForm((prev) => ({ ...prev, deposit_required: e.target.value }))}
+                                />
+                            </div>
+                            <div>
+                                <div style={{ fontSize: "0.75rem", marginBottom: "4px" }}>Deposit Posted</div>
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    style={inputStyle}
+                                    value={profileForm.deposit_posted}
+                                    onChange={(e) => setProfileForm((prev) => ({ ...prev, deposit_posted: e.target.value }))}
+                                />
+                            </div>
+                            <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", marginTop: "var(--space-2)" }}>
+                                <button
+                                    disabled={busy}
+                                    onClick={handleProfileSave}
+                                    style={{
+                                        padding: "8px 14px",
+                                        background: "var(--primary-blue)",
+                                        border: "none",
+                                        borderRadius: "var(--radius-small)",
+                                        color: "var(--white)",
+                                        fontWeight: 600,
+                                        cursor: busy ? "not-allowed" : "pointer",
+                                        opacity: busy ? 0.7 : 1,
+                                    }}
+                                >
+                                    Save Profile
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-2)" }}>
+                            <div>
+                                <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>Contact</div>
+                                <div>{driver.email}</div>
+                                <div>{driver.phone}</div>
+                            </div>
+                            <div>
+                                <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>Billing</div>
+                                <div>
+                                    ${driver.billing_rate} / {driver.billing_type}
                                 </div>
-                            );
-                        })}
+                                <div style={{ marginTop: "4px" }}>{renderBillingBadge(driver.billing_status)}</div>
+                                {driver.terminated_at && (
+                                    <div style={{ fontSize: "0.75rem", color: "var(--error-red)", marginTop: "4px" }}>
+                                        Terminated: {new Date(driver.terminated_at).toLocaleString()}
+                                    </div>
+                                )}
+                            </div>
+                            <div>
+                                <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>Deposit Required</div>
+                                <div>${Number(driver.deposit_required || 0).toFixed(2)}</div>
+                            </div>
+                            <div>
+                                <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>Deposit Posted</div>
+                                <div>${Number(driver.deposit_posted || 0).toFixed(2)}</div>
+                                <div style={{ fontSize: "0.75rem", opacity: 0.6 }}>
+                                    Updated: {driver.deposit_updated_at ? new Date(driver.deposit_updated_at).toLocaleString() : "-"}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <div
+                    style={{
+                        background: "var(--white)",
+                        borderRadius: "var(--radius-standard)",
+                        padding: "var(--space-3)",
+                        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.08)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "var(--space-2)",
+                    }}
+                >
+                    <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1rem", color: "var(--dark-gray)" }}>Billing Controls</h3>
+                    <button
+                        disabled={busy}
+                        onClick={() => handleBillingStatusChange("active")}
+                        style={{
+                            padding: "8px 12px",
+                            background: "#D4EDDA",
+                            border: "1px solid #9ad7a0",
+                            borderRadius: "var(--radius-small)",
+                            cursor: busy ? "not-allowed" : "pointer",
+                        }}
+                    >
+                        Resume
+                    </button>
+                    <button
+                        disabled={busy}
+                        onClick={() => handleBillingStatusChange("paused")}
+                        style={{
+                            padding: "8px 12px",
+                            background: "#FFF3CD",
+                            border: "1px solid #e7d387",
+                            borderRadius: "var(--radius-small)",
+                            cursor: busy ? "not-allowed" : "pointer",
+                        }}
+                    >
+                        Pause
+                    </button>
+                    <button
+                        disabled={busy}
+                        onClick={() => handleBillingStatusChange("terminated")}
+                        style={{
+                            padding: "8px 12px",
+                            background: "#F8D7DA",
+                            border: "1px solid #e1a9af",
+                            borderRadius: "var(--radius-small)",
+                            cursor: busy ? "not-allowed" : "pointer",
+                        }}
+                    >
+                        Terminate
+                    </button>
+
+                    <hr style={{ border: "none", borderTop: "1px solid var(--light-gray)" }} />
+                    <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>Driver Portal</div>
+                    <div style={{ fontSize: "0.8rem", wordBreak: "break-all" }}>{portalUrl || "No link"}</div>
+                    {portalUrl && (
+                        <a
+                            href={portalUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                                display: "inline-block",
+                                marginTop: "4px",
+                                color: "var(--primary-blue)",
+                                fontWeight: 600,
+                                textDecoration: "none",
+                            }}
+                        >
+                            Open Live Portal
+                        </a>
+                    )}
+                </div>
+            </div>
+
+            {driver.application_info && Object.keys(driver.application_info).length > 0 && (
+                <div
+                    style={{
+                        background: "var(--white)",
+                        borderRadius: "var(--radius-standard)",
+                        padding: "var(--space-4)",
+                        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.08)",
+                        marginBottom: "var(--space-4)",
+                    }}
+                >
+                    <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1rem", color: "var(--dark-gray)", marginBottom: "var(--space-2)" }}>
+                        Full Profile (Application Data)
+                    </h3>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
+                        {sortFormEntries(Object.entries(driver.application_info).filter(([key]) => !HIDDEN_FIELDS.has(key))).map(([key, value]) => (
+                            <div key={key}>
+                                <div style={{ fontSize: "0.75rem", opacity: 0.6, textTransform: "uppercase", marginBottom: "4px" }}>
+                                    {getFieldLabel(key)}
+                                </div>
+                                <div style={{ fontWeight: 500 }}>
+                                    {typeof value === "object" && value !== null ? JSON.stringify(value) : String(value ?? "-")}
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 </div>
             )}
 
-            {/* Two Column Layout */}
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 'var(--space-4)' }}>
-                {/* Ledger History */}
-                <div style={{
-                    background: 'var(--white)',
-                    borderRadius: 'var(--radius-standard)',
-                    padding: 'var(--space-3)',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
-                }}>
-                    <h3 style={{
-                        fontFamily: 'var(--font-heading)',
-                        fontSize: '1rem',
-                        color: 'var(--dark-gray)',
-                        marginBottom: 'var(--space-3)',
-                    }}>
-                        Ledger History
-                    </h3>
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--space-4)", marginBottom: "var(--space-4)" }}>
+                <div
+                    style={{
+                        background: "var(--white)",
+                        borderRadius: "var(--radius-standard)",
+                        padding: "var(--space-3)",
+                        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.08)",
+                    }}
+                >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-2)" }}>
+                        <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1rem", color: "var(--dark-gray)" }}>Ledger History</h3>
+                    </div>
                     {ledger.length === 0 ? (
-                        <p style={{ color: 'var(--dark-gray)', opacity: 0.6 }}>No transactions yet</p>
+                        <p style={{ color: "var(--dark-gray)", opacity: 0.6 }}>No transactions yet</p>
                     ) : (
-                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
                             <thead>
-                                <tr style={{ background: 'var(--light-gray)' }}>
-                                    <th style={{ padding: 'var(--space-2)', textAlign: 'left', color: 'var(--dark-gray)', fontWeight: 600, fontSize: '0.75rem' }}>Date</th>
-                                    <th style={{ padding: 'var(--space-2)', textAlign: 'left', color: 'var(--dark-gray)', fontWeight: 600, fontSize: '0.75rem' }}>Description</th>
-                                    <th style={{ padding: 'var(--space-2)', textAlign: 'left', color: 'var(--dark-gray)', fontWeight: 600, fontSize: '0.75rem' }}>Type</th>
-                                    <th style={{ padding: 'var(--space-2)', textAlign: 'right', color: 'var(--dark-gray)', fontWeight: 600, fontSize: '0.75rem' }}>Amount</th>
+                                <tr style={{ background: "var(--light-gray)" }}>
+                                    <th style={{ padding: "8px", textAlign: "left", fontSize: "0.75rem" }}>Date</th>
+                                    <th style={{ padding: "8px", textAlign: "left", fontSize: "0.75rem" }}>Description</th>
+                                    <th style={{ padding: "8px", textAlign: "left", fontSize: "0.75rem" }}>Source</th>
+                                    <th style={{ padding: "8px", textAlign: "right", fontSize: "0.75rem" }}>Amount</th>
+                                    <th style={{ padding: "8px", textAlign: "right", fontSize: "0.75rem" }}>Action</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {ledger.map((entry) => (
-                                    <tr key={entry.id} style={{ borderTop: '1px solid var(--light-gray)' }}>
-                                        <td style={{ padding: 'var(--space-2)', color: 'var(--dark-gray)', fontSize: '0.875rem' }}>
-                                            {new Date(entry.created_at).toLocaleDateString()}
+                                    <tr key={entry.id} style={{ borderTop: "1px solid var(--light-gray)" }}>
+                                        <td style={{ padding: "8px", fontSize: "0.875rem" }}>{new Date(entry.created_at).toLocaleString()}</td>
+                                        <td style={{ padding: "8px", fontSize: "0.875rem" }}>{entry.description || "-"}</td>
+                                        <td style={{ padding: "8px", fontSize: "0.75rem", textTransform: "uppercase" }}>{entry.entry_source || "system"}</td>
+                                        <td
+                                            style={{
+                                                padding: "8px",
+                                                textAlign: "right",
+                                                fontWeight: 600,
+                                                color: entry.type === "credit" ? "var(--success-green)" : "var(--error-red)",
+                                            }}
+                                        >
+                                            {entry.type === "credit" ? "+" : "-"}${Number(entry.amount).toFixed(2)}
                                         </td>
-                                        <td style={{ padding: 'var(--space-2)', color: 'var(--dark-gray)', fontSize: '0.875rem' }}>
-                                            {entry.description}
-                                        </td>
-                                        <td style={{ padding: 'var(--space-2)' }}>
-                                            <span style={{
-                                                padding: '2px 6px',
-                                                background: entry.type === 'credit' ? '#D4EDDA' : '#F8D7DA',
-                                                color: entry.type === 'credit' ? '#155724' : '#721C24',
-                                                borderRadius: '4px',
-                                                fontSize: '0.75rem',
-                                                fontWeight: 500,
-                                            }}>
-                                                {entry.type}
-                                            </span>
-                                        </td>
-                                        <td style={{
-                                            padding: 'var(--space-2)',
-                                            textAlign: 'right',
-                                            fontWeight: 600,
-                                            fontSize: '0.875rem',
-                                            color: entry.type === 'credit' ? 'var(--success-green)' : 'var(--error-red)',
-                                        }}>
-                                            {entry.type === 'credit' ? '+' : '-'}${entry.amount.toFixed(2)}
+                                        <td style={{ padding: "8px", textAlign: "right" }}>
+                                            {entry.entry_source !== "reversal" && !entry.reversal_of_id ? (
+                                                <button
+                                                    disabled={busy}
+                                                    onClick={() => handleCancelLedgerEntry(entry.id)}
+                                                    style={{
+                                                        padding: "4px 8px",
+                                                        borderRadius: "var(--radius-small)",
+                                                        border: "1px solid var(--medium-gray)",
+                                                        background: "var(--light-gray)",
+                                                        cursor: busy ? "not-allowed" : "pointer",
+                                                        fontSize: "0.75rem",
+                                                    }}
+                                                >
+                                                    Cancel Entry
+                                                </button>
+                                            ) : (
+                                                <span style={{ fontSize: "0.75rem", opacity: 0.6 }}>-</span>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
@@ -381,50 +848,277 @@ export default function DriverDetail() {
                     )}
                 </div>
 
-                {/* Payment Aliases */}
-                <div style={{
-                    background: 'var(--white)',
-                    borderRadius: 'var(--radius-standard)',
-                    padding: 'var(--space-3)',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
-                }}>
-                    <h3 style={{
-                        fontFamily: 'var(--font-heading)',
-                        fontSize: '1rem',
-                        color: 'var(--dark-gray)',
-                        marginBottom: 'var(--space-3)',
-                    }}>
+                <div
+                    style={{
+                        background: "var(--white)",
+                        borderRadius: "var(--radius-standard)",
+                        padding: "var(--space-3)",
+                        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.08)",
+                    }}
+                >
+                    <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1rem", color: "var(--dark-gray)", marginBottom: "var(--space-2)" }}>
+                        Manual Entry
+                    </h3>
+                    <form onSubmit={handleManualLedgerSubmit} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <select
+                            style={inputStyle}
+                            value={manualForm.entry_type}
+                            onChange={(e) =>
+                                setManualForm((prev) => ({ ...prev, entry_type: e.target.value as "charge" | "credit" }))
+                            }
+                        >
+                            <option value="charge">Manual Charge (+debit)</option>
+                            <option value="credit">Manual Credit (-debt)</option>
+                        </select>
+                        <input
+                            style={inputStyle}
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            placeholder="Amount"
+                            value={manualForm.amount}
+                            onChange={(e) => setManualForm((prev) => ({ ...prev, amount: e.target.value }))}
+                        />
+                        <input
+                            style={inputStyle}
+                            type="datetime-local"
+                            value={manualForm.date}
+                            onChange={(e) => setManualForm((prev) => ({ ...prev, date: e.target.value }))}
+                        />
+                        <textarea
+                            style={{ ...inputStyle, minHeight: "80px" }}
+                            placeholder="Notes / explanation"
+                            value={manualForm.notes}
+                            onChange={(e) => setManualForm((prev) => ({ ...prev, notes: e.target.value }))}
+                        />
+                        <button
+                            type="submit"
+                            disabled={busy}
+                            style={{
+                                padding: "8px 12px",
+                                background: "var(--primary-blue)",
+                                color: "var(--white)",
+                                border: "none",
+                                borderRadius: "var(--radius-small)",
+                                fontWeight: 600,
+                                cursor: busy ? "not-allowed" : "pointer",
+                            }}
+                        >
+                            Add Manual Entry
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)", marginBottom: "var(--space-4)" }}>
+                <div
+                    style={{
+                        background: "var(--white)",
+                        borderRadius: "var(--radius-standard)",
+                        padding: "var(--space-3)",
+                        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.08)",
+                    }}
+                >
+                    <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1rem", color: "var(--dark-gray)", marginBottom: "var(--space-2)" }}>
                         Payment Aliases
                     </h3>
+                    <form onSubmit={handleAddAlias} style={{ display: "grid", gridTemplateColumns: "140px 1fr auto", gap: "8px", marginBottom: "var(--space-2)" }}>
+                        <select style={inputStyle} value={newAliasType} onChange={(e) => setNewAliasType(e.target.value)}>
+                            <option value="zelle">zelle</option>
+                            <option value="venmo">venmo</option>
+                            <option value="cashapp">cashapp</option>
+                            <option value="chime">chime</option>
+                            <option value="email">email</option>
+                            <option value="phone">phone</option>
+                        </select>
+                        <input
+                            style={inputStyle}
+                            placeholder="Alias value (e.g. Rebecca handle)"
+                            value={newAliasValue}
+                            onChange={(e) => setNewAliasValue(e.target.value)}
+                        />
+                        <button
+                            type="submit"
+                            disabled={busy}
+                            style={{
+                                padding: "8px 10px",
+                                border: "none",
+                                borderRadius: "var(--radius-small)",
+                                background: "var(--primary-blue)",
+                                color: "var(--white)",
+                                cursor: busy ? "not-allowed" : "pointer",
+                            }}
+                        >
+                            Add
+                        </button>
+                    </form>
                     {aliases.length === 0 ? (
-                        <p style={{ color: 'var(--dark-gray)', opacity: 0.6, fontSize: '0.875rem' }}>
-                            No aliases configured
-                        </p>
+                        <p style={{ fontSize: "0.875rem", opacity: 0.6 }}>No aliases configured</p>
                     ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                             {aliases.map((alias) => (
-                                <div key={alias.id} style={{
-                                    padding: 'var(--space-2)',
-                                    background: 'var(--light-gray)',
-                                    borderRadius: 'var(--radius-small)',
-                                }}>
-                                    <div style={{
-                                        color: 'var(--dark-gray)',
-                                        opacity: 0.6,
-                                        fontSize: '0.65rem',
-                                        textTransform: 'uppercase',
-                                        marginBottom: '2px',
-                                    }}>
-                                        {alias.alias_type}
+                                <div
+                                    key={alias.id}
+                                    style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "center",
+                                        background: "var(--light-gray)",
+                                        borderRadius: "var(--radius-small)",
+                                        padding: "8px 10px",
+                                    }}
+                                >
+                                    <div>
+                                        <div style={{ fontSize: "0.65rem", textTransform: "uppercase", opacity: 0.6 }}>{alias.alias_type}</div>
+                                        <div>{alias.alias_value}</div>
                                     </div>
-                                    <div style={{ color: 'var(--dark-gray)', fontSize: '0.875rem' }}>
-                                        {alias.alias_value}
-                                    </div>
+                                    <button
+                                        disabled={busy}
+                                        onClick={() => handleDeleteAlias(alias.id)}
+                                        style={{
+                                            padding: "4px 8px",
+                                            border: "1px solid var(--medium-gray)",
+                                            borderRadius: "var(--radius-small)",
+                                            background: "var(--white)",
+                                            cursor: busy ? "not-allowed" : "pointer",
+                                        }}
+                                    >
+                                        Remove
+                                    </button>
                                 </div>
                             ))}
                         </div>
                     )}
                 </div>
+
+                <div
+                    style={{
+                        background: "var(--white)",
+                        borderRadius: "var(--radius-standard)",
+                        padding: "var(--space-3)",
+                        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.08)",
+                    }}
+                >
+                    <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1rem", color: "var(--dark-gray)", marginBottom: "var(--space-2)" }}>
+                        Swap Vehicle
+                    </h3>
+                    <form onSubmit={handleSwapVehicle} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <input
+                            style={inputStyle}
+                            placeholder="New license plate"
+                            value={swapPlate}
+                            onChange={(e) => setSwapPlate(e.target.value)}
+                        />
+                        <input
+                            style={inputStyle}
+                            type="datetime-local"
+                            value={swapStartAt}
+                            onChange={(e) => setSwapStartAt(e.target.value)}
+                        />
+                        <button
+                            type="submit"
+                            disabled={busy}
+                            style={{
+                                padding: "8px 12px",
+                                border: "none",
+                                borderRadius: "var(--radius-small)",
+                                background: "var(--primary-blue)",
+                                color: "var(--white)",
+                                fontWeight: 600,
+                                cursor: busy ? "not-allowed" : "pointer",
+                            }}
+                        >
+                            Swap Vehicle
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <div
+                style={{
+                    background: "var(--white)",
+                    borderRadius: "var(--radius-standard)",
+                    padding: "var(--space-3)",
+                    boxShadow: "0 2px 8px rgba(0, 0, 0, 0.08)",
+                }}
+            >
+                <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1rem", color: "var(--dark-gray)", marginBottom: "var(--space-2)" }}>
+                    Vehicle Assignments
+                </h3>
+                <form onSubmit={handleAssignmentSubmit} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: "8px", marginBottom: "var(--space-3)" }}>
+                    <input
+                        style={inputStyle}
+                        placeholder="License plate"
+                        value={assignmentForm.license_plate}
+                        onChange={(e) => setAssignmentForm((prev) => ({ ...prev, license_plate: e.target.value }))}
+                    />
+                    <input
+                        style={inputStyle}
+                        type="datetime-local"
+                        value={assignmentForm.start_at}
+                        onChange={(e) => setAssignmentForm((prev) => ({ ...prev, start_at: e.target.value }))}
+                    />
+                    <input
+                        style={inputStyle}
+                        type="datetime-local"
+                        value={assignmentForm.end_at}
+                        onChange={(e) => setAssignmentForm((prev) => ({ ...prev, end_at: e.target.value }))}
+                    />
+                    <button
+                        type="submit"
+                        disabled={busy}
+                        style={{
+                            padding: "8px 12px",
+                            border: "none",
+                            borderRadius: "var(--radius-small)",
+                            background: "var(--primary-blue)",
+                            color: "var(--white)",
+                            cursor: busy ? "not-allowed" : "pointer",
+                        }}
+                    >
+                        {editingAssignmentId ? "Update" : "Add"}
+                    </button>
+                </form>
+
+                {assignments.length === 0 ? (
+                    <p style={{ opacity: 0.6 }}>No vehicle assignments yet</p>
+                ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                            <tr style={{ background: "var(--light-gray)" }}>
+                                <th style={{ padding: "8px", textAlign: "left", fontSize: "0.75rem" }}>Plate</th>
+                                <th style={{ padding: "8px", textAlign: "left", fontSize: "0.75rem" }}>Start</th>
+                                <th style={{ padding: "8px", textAlign: "left", fontSize: "0.75rem" }}>End</th>
+                                <th style={{ padding: "8px", textAlign: "left", fontSize: "0.75rem" }}>Chain</th>
+                                <th style={{ padding: "8px", textAlign: "right", fontSize: "0.75rem" }}>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {assignments.map((item) => (
+                                <tr key={item.id} style={{ borderTop: "1px solid var(--light-gray)" }}>
+                                    <td style={{ padding: "8px" }}>{item.license_plate}</td>
+                                    <td style={{ padding: "8px" }}>{new Date(item.start_at).toLocaleString()}</td>
+                                    <td style={{ padding: "8px" }}>{item.end_at ? new Date(item.end_at).toLocaleString() : "-"}</td>
+                                    <td style={{ padding: "8px", fontSize: "0.75rem" }}>{item.previous_assignment_id || "-"}</td>
+                                    <td style={{ padding: "8px", textAlign: "right" }}>
+                                        <button
+                                            onClick={() => startEditingAssignment(item)}
+                                            style={{
+                                                padding: "4px 8px",
+                                                borderRadius: "var(--radius-small)",
+                                                border: "1px solid var(--medium-gray)",
+                                                background: "var(--white)",
+                                                cursor: "pointer",
+                                            }}
+                                        >
+                                            Edit
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
             </div>
         </div>
     );

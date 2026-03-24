@@ -45,6 +45,15 @@ export default function Layout() {
                         </svg>
                         Drivers
                     </NavLink>
+                    <NavLink to="/ticket-finder" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M3 7h18v10H3z" />
+                            <path d="M7 7V5h10v2" />
+                            <circle cx="8.5" cy="12" r="1.5" />
+                            <circle cx="15.5" cy="12" r="1.5" />
+                        </svg>
+                        Ticket Finder
+                    </NavLink>
                     <NavLink to="/payments" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />

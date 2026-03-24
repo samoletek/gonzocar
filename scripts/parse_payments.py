@@ -24,6 +24,7 @@ from uuid import uuid4
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models.models import PaymentRaw, Alias, Ledger, Driver
@@ -59,18 +60,15 @@ def is_duplicate(db: Session, source: str, transaction_id: str, gmail_id: str = 
 
 def find_driver_by_alias(db: Session, sender_name: str, sender_identifier: str) -> Driver:
     """Try to match sender to a driver via aliases."""
-    # Try exact match on sender name
-    alias = db.query(Alias).filter(
-        Alias.alias_value == sender_name
-    ).first()
-    
-    if alias:
-        return db.query(Driver).filter(Driver.id == alias.driver_id).first()
-    
-    # Try sender identifier (email/phone) if available
+    candidates = []
+    if sender_name:
+        candidates.append(sender_name.strip())
     if sender_identifier:
+        candidates.append(sender_identifier.strip())
+
+    for candidate in candidates:
         alias = db.query(Alias).filter(
-            Alias.alias_value == sender_identifier
+            func.lower(Alias.alias_value) == candidate.lower()
         ).first()
         if alias:
             return db.query(Driver).filter(Driver.id == alias.driver_id).first()

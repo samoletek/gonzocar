@@ -170,7 +170,7 @@ def assign_payment(
     db.add(ledger_entry)
     
     # Create alias for future matching
-    if data.create_alias and payment.sender_name:
+    if data.create_alias and (payment.sender_name or payment.sender_identifier):
         # Determine alias type based on payment source
         alias_type_map = {
             'zelle': AliasType.zelle,
@@ -179,17 +179,25 @@ def assign_payment(
             'chime': AliasType.chime,
         }
         alias_type = alias_type_map.get(payment.source.value, AliasType.zelle)
-        
-        # Check if alias already exists
-        existing_alias = db.query(Alias).filter(
-            Alias.alias_value == payment.sender_name
-        ).first()
-        
-        if not existing_alias:
+
+        alias_candidates = []
+        if payment.sender_name:
+            alias_candidates.append(payment.sender_name.strip())
+        if payment.sender_identifier:
+            alias_candidates.append(payment.sender_identifier.strip())
+
+        for candidate in alias_candidates:
+            if not candidate:
+                continue
+            existing_alias = db.query(Alias).filter(
+                func.lower(Alias.alias_value) == candidate.lower()
+            ).first()
+            if existing_alias:
+                continue
             new_alias = Alias(
                 driver_id=driver.id,
                 alias_type=alias_type,
-                alias_value=payment.sender_name,
+                alias_value=candidate,
                 created_at=datetime.utcnow()
             )
             db.add(new_alias)

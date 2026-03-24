@@ -9,6 +9,8 @@ import Drivers from './pages/Drivers';
 import DriverDetail from './pages/DriverDetail';
 import Payments from './pages/Payments';
 import Settings from './pages/Settings';
+import TicketFinder from './pages/TicketFinder';
+import DriverPortal from './pages/DriverPortal';
 import './index.css';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -26,6 +28,7 @@ function AppRoutes() {
 
   return (
     <Routes>
+      <Route path="/portal/:token" element={<DriverPortal />} />
       <Route path="/login" element={isAuthenticated ? <Navigate to="/" /> : <Login />} />
       <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
         <Route index element={<Dashboard />} />
@@ -33,6 +36,7 @@ function AppRoutes() {
         <Route path="applications/:id" element={<ApplicationDetail />} />
         <Route path="drivers" element={<Drivers />} />
         <Route path="drivers/:id" element={<DriverDetail />} />
+        <Route path="ticket-finder" element={<TicketFinder />} />
         <Route path="payments" element={<Payments />} />
         <Route path="settings" element={<Settings />} />
       </Route>

@@ -1,7 +1,8 @@
-from pydantic import BaseModel, EmailStr
-from typing import Optional
-from uuid import UUID
 from datetime import datetime
+from typing import Literal, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, EmailStr, Field
 
 
 # Auth
@@ -41,10 +42,14 @@ class DriverBase(BaseModel):
     phone: str
     billing_type: str = "daily"
     billing_rate: float
+    billing_status: str = "active"
+    deposit_required: float = 0.0
+    deposit_posted: float = 0.0
+    deposit_updated_at: Optional[datetime] = None
 
 
 class DriverCreate(DriverBase):
-    pass
+    portal_token: Optional[str] = None
 
 
 class DriverUpdate(BaseModel):
@@ -55,11 +60,18 @@ class DriverUpdate(BaseModel):
     billing_type: Optional[str] = None
     billing_rate: Optional[float] = None
     billing_active: Optional[bool] = None
+    billing_status: Optional[str] = None
+    deposit_required: Optional[float] = None
+    deposit_posted: Optional[float] = None
+    deposit_updated_at: Optional[datetime] = None
+    terminated_at: Optional[datetime] = None
 
 
 class DriverResponse(DriverBase):
     id: UUID
     billing_active: bool
+    terminated_at: Optional[datetime] = None
+    portal_token: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     balance: Optional[float] = None
@@ -67,6 +79,10 @@ class DriverResponse(DriverBase):
 
     class Config:
         from_attributes = True
+
+
+class BillingStatusUpdate(BaseModel):
+    status: Literal["active", "paused", "terminated"]
 
 
 # Applications
@@ -152,7 +168,56 @@ class LedgerResponse(BaseModel):
     type: str
     amount: float
     description: Optional[str] = None
+    entry_source: Optional[str] = None
+    reversal_of_id: Optional[UUID] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class ManualLedgerCreate(BaseModel):
+    entry_type: Literal["charge", "credit"]
+    amount: float = Field(gt=0)
+    date: Optional[datetime] = None
+    notes: Optional[str] = None
+    acknowledge_overlap: bool = False
+
+
+class LedgerCancelRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+# Vehicle assignments / ticket liability
+class VehicleAssignmentCreate(BaseModel):
+    driver_id: UUID
+    license_plate: str
+    start_at: Optional[datetime] = None
+    end_at: Optional[datetime] = None
+    previous_assignment_id: Optional[UUID] = None
+    acknowledge_overlap: bool = False
+
+
+class VehicleAssignmentUpdate(BaseModel):
+    license_plate: Optional[str] = None
+    start_at: Optional[datetime] = None
+    end_at: Optional[datetime] = None
+    acknowledge_overlap: bool = False
+
+
+class VehicleAssignmentResponse(BaseModel):
+    id: UUID
+    driver_id: UUID
+    driver_name: str
+    license_plate: str
+    start_at: datetime
+    end_at: Optional[datetime] = None
+    previous_assignment_id: Optional[UUID] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SwapVehicleRequest(BaseModel):
+    new_license_plate: str
+    start_at: Optional[datetime] = None
+    acknowledge_overlap: bool = False

@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Optional
 from uuid import UUID
+from uuid import uuid4
 
 from app.api.deps import get_db, get_current_user
-from app.models import Application, ApplicationComment, Driver, Staff, Ledger
+from app.models import Application, ApplicationComment, Driver, Staff, Ledger, BillingStatus
 from app.schemas import (
     ApplicationCreate, ApplicationResponse, ApplicationStatusUpdate,
     CommentCreate, CommentResponse
@@ -18,14 +19,16 @@ def list_applications(
     skip: int = 0,
     limit: int = 100,
     status_filter: Optional[str] = None,
+    status: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: Staff = Depends(get_current_user)
 ):
     """List all applications with optional status filter."""
     query = db.query(Application)
     
-    if status_filter:
-        query = query.filter(Application.status == status_filter)
+    effective_status = status_filter or status
+    if effective_status:
+        query = query.filter(Application.status == effective_status)
     
     applications = query.order_by(
         Application.created_at.desc()
@@ -101,7 +104,10 @@ def update_status(
             email=form_data.get("email", ""),
             phone=form_data.get("phone", "") or form_data.get("phone_number", ""),
             billing_type=form_data.get("billing_type", "daily"),
-            billing_rate=form_data.get("billing_rate", 0)
+            billing_rate=form_data.get("billing_rate", 0),
+            billing_status=BillingStatus.active,
+            billing_active=True,
+            portal_token=uuid4().hex,
         )
         db.add(driver)
         db.flush()

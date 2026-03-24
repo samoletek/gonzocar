@@ -29,9 +29,9 @@ from dotenv import load_dotenv
 load_dotenv('.env.local')
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from app.core.database import SessionLocal
-from app.models import Driver, Ledger, SmsLog, LedgerType, BillingType
+from app.models import Driver, Ledger, SmsLog, LedgerType, BillingType, BillingStatus
 from app.services.openphone import openphone, SmsTemplates
 
 
@@ -215,7 +215,12 @@ def run_billing():
     
     try:
         # Get active drivers
-        drivers = db.query(Driver).filter(Driver.billing_active == True).all()
+        drivers = db.query(Driver).filter(
+            or_(
+                Driver.billing_status == BillingStatus.active,
+                (Driver.billing_status.is_(None) & (Driver.billing_active == True)),
+            )
+        ).all()
         print(f"Found {len(drivers)} active drivers")
         
         if not drivers:
@@ -259,7 +264,12 @@ def run_with_dry_run():
     db = get_db()
     
     try:
-        drivers = db.query(Driver).filter(Driver.billing_active == True).all()
+        drivers = db.query(Driver).filter(
+            or_(
+                Driver.billing_status == BillingStatus.active,
+                (Driver.billing_status.is_(None) & (Driver.billing_active == True)),
+            )
+        ).all()
         print(f"Found {len(drivers)} active drivers")
         
         print("\n--- Would Create Debits For ---")

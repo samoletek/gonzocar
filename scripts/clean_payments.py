@@ -17,7 +17,7 @@ def clean_payments():
     """
     db = SessionLocal()
     try:
-        print("🗑️  Cleaning 'payments_raw' table...")
+        print("Cleaning 'payments_raw' table...")
         
         # Count before
         count = db.execute(text("SELECT COUNT(*) FROM payments_raw")).scalar()
@@ -27,18 +27,18 @@ def clean_payments():
         db.execute(text("DELETE FROM payments_raw"))
         db.commit()
         
-        print("✅ Successfully deleted all records from payments_raw.")
+        print("Successfully deleted all records from payments_raw.")
         print("   The Admin Dashboard > Payments page should now be empty.")
         
     except Exception as e:
-        print(f"❌ Error cleaning database: {e}")
+        print(f"Error cleaning database: {e}")
         db.rollback()
     finally:
         db.close()
 
 if __name__ == "__main__":
     # check for confirmation
-    confirm = input("⚠️  This will DELETE ALL PAYMENT HISTORY from the database. Are you sure? (y/n): ")
+    confirm = input("This will DELETE ALL PAYMENT HISTORY from the database. Are you sure? (y/n): ")
     if confirm.lower() == 'y':
         clean_payments()
     else:

@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
 interface LoginCredentials {
     email: string;
@@ -14,15 +14,15 @@ class ApiService {
     private token: string | null = null;
 
     constructor() {
-        this.token = localStorage.getItem('token');
+        this.token = localStorage.getItem("token");
     }
 
-    private headers(): HeadersInit {
+    private headers(includeAuth: boolean = true): HeadersInit {
         const headers: HeadersInit = {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
         };
-        if (this.token) {
-            headers['Authorization'] = `Bearer ${this.token}`;
+        if (includeAuth && this.token) {
+            headers["Authorization"] = `Bearer ${this.token}`;
         }
         return headers;
     }
@@ -30,9 +30,9 @@ class ApiService {
     setToken(token: string | null) {
         this.token = token;
         if (token) {
-            localStorage.setItem('token', token);
+            localStorage.setItem("token", token);
         } else {
-            localStorage.removeItem('token');
+            localStorage.removeItem("token");
         }
     }
 
@@ -42,11 +42,11 @@ class ApiService {
 
     async login(credentials: LoginCredentials): Promise<TokenResponse> {
         const response = await fetch(`${API_URL}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(credentials),
         });
-        if (!response.ok) throw new Error('Login failed');
+        if (!response.ok) throw new Error("Login failed");
         const data = await response.json();
         this.setToken(data.access_token);
         return data;
@@ -58,14 +58,14 @@ class ApiService {
 
     async me() {
         const response = await fetch(`${API_URL}/auth/me`, { headers: this.headers() });
-        if (!response.ok) throw new Error('Not authenticated');
+        if (!response.ok) throw new Error("Not authenticated");
         return response.json();
     }
 
     // Drivers
     async getDrivers() {
         const response = await fetch(`${API_URL}/drivers`, { headers: this.headers() });
-        if (!response.ok) throw new Error('Failed to fetch drivers');
+        if (!response.ok) throw new Error("Failed to fetch drivers");
         return response.json();
     }
 
@@ -76,117 +76,306 @@ class ApiService {
         phone: string;
         billing_type: string;
         billing_rate: number;
+        billing_status?: string;
+        deposit_required?: number;
+        deposit_posted?: number;
+        deposit_updated_at?: string | null;
     }) {
         const response = await fetch(`${API_URL}/drivers`, {
-            method: 'POST',
+            method: "POST",
             headers: this.headers(),
             body: JSON.stringify(data),
         });
-        if (!response.ok) throw new Error('Failed to create driver');
+        if (!response.ok) throw new Error("Failed to create driver");
         return response.json();
     }
 
     async getDriver(id: string) {
         const response = await fetch(`${API_URL}/drivers/${id}`, { headers: this.headers() });
-        if (!response.ok) throw new Error('Failed to fetch driver');
+        if (!response.ok) throw new Error("Failed to fetch driver");
+        return response.json();
+    }
+
+    async updateDriver(id: string, data: Record<string, unknown>) {
+        const response = await fetch(`${API_URL}/drivers/${id}`, {
+            method: "PATCH",
+            headers: this.headers(),
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) throw new Error("Failed to update driver");
         return response.json();
     }
 
     async getDriverLedger(id: string) {
         const response = await fetch(`${API_URL}/drivers/${id}/ledger`, { headers: this.headers() });
-        if (!response.ok) throw new Error('Failed to fetch ledger');
+        if (!response.ok) throw new Error("Failed to fetch ledger");
+        return response.json();
+    }
+
+    async createManualLedgerEntry(
+        driverId: string,
+        data: {
+            entry_type: "charge" | "credit";
+            amount: number;
+            date?: string;
+            notes?: string;
+            acknowledge_overlap?: boolean;
+        }
+    ) {
+        const response = await fetch(`${API_URL}/drivers/${driverId}/ledger/manual`, {
+            method: "POST",
+            headers: this.headers(),
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const err = new Error("Failed to create manual ledger entry");
+            (err as Error & { status?: number; data?: unknown }).status = response.status;
+            (err as Error & { status?: number; data?: unknown }).data = errorData;
+            throw err;
+        }
+        return response.json();
+    }
+
+    async cancelLedgerEntry(driverId: string, ledgerId: string, reason?: string) {
+        const response = await fetch(`${API_URL}/drivers/${driverId}/ledger/${ledgerId}/cancel`, {
+            method: "POST",
+            headers: this.headers(),
+            body: JSON.stringify({ reason }),
+        });
+        if (!response.ok) throw new Error("Failed to cancel ledger entry");
         return response.json();
     }
 
     async getDriverAliases(id: string) {
         const response = await fetch(`${API_URL}/drivers/${id}/aliases`, { headers: this.headers() });
-        if (!response.ok) throw new Error('Failed to fetch aliases');
+        if (!response.ok) throw new Error("Failed to fetch aliases");
         return response.json();
+    }
+
+    async createDriverAlias(
+        driverId: string,
+        data: {
+            alias_type: string;
+            alias_value: string;
+        }
+    ) {
+        const response = await fetch(`${API_URL}/drivers/${driverId}/aliases`, {
+            method: "POST",
+            headers: this.headers(),
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) throw new Error("Failed to create alias");
+        return response.json();
+    }
+
+    async deleteDriverAlias(driverId: string, aliasId: string) {
+        const response = await fetch(`${API_URL}/drivers/${driverId}/aliases/${aliasId}`, {
+            method: "DELETE",
+            headers: this.headers(),
+        });
+        if (!response.ok) throw new Error("Failed to delete alias");
     }
 
     async updateDriverBilling(id: string, active: boolean) {
         const response = await fetch(`${API_URL}/drivers/${id}/billing`, {
-            method: 'PATCH',
+            method: "PATCH",
             headers: this.headers(),
             body: JSON.stringify({ billing_active: active }),
         });
-        if (!response.ok) throw new Error('Failed to update billing');
+        if (!response.ok) throw new Error("Failed to update billing");
+        return response.json();
+    }
+
+    async updateDriverBillingStatus(id: string, status: "active" | "paused" | "terminated") {
+        const response = await fetch(`${API_URL}/drivers/${id}/billing-status`, {
+            method: "PATCH",
+            headers: this.headers(),
+            body: JSON.stringify({ status }),
+        });
+        if (!response.ok) throw new Error("Failed to update billing status");
+        return response.json();
+    }
+
+    async getDriverPortalLink(id: string) {
+        const response = await fetch(`${API_URL}/drivers/${id}/portal-link`, { headers: this.headers() });
+        if (!response.ok) throw new Error("Failed to fetch portal link");
+        return response.json();
+    }
+
+    async getPublicDriverPortal(token: string) {
+        const response = await fetch(`${API_URL}/drivers/public/${token}`, {
+            headers: this.headers(false),
+        });
+        if (!response.ok) throw new Error("Failed to fetch driver portal");
+        return response.json();
+    }
+
+    async getDriverVehicleAssignments(driverId: string) {
+        const response = await fetch(`${API_URL}/drivers/${driverId}/vehicle-assignments`, {
+            headers: this.headers(),
+        });
+        if (!response.ok) throw new Error("Failed to fetch vehicle assignments");
+        return response.json();
+    }
+
+    async createVehicleAssignment(data: {
+        driver_id: string;
+        license_plate: string;
+        start_at?: string;
+        end_at?: string;
+        previous_assignment_id?: string;
+        acknowledge_overlap?: boolean;
+    }) {
+        const response = await fetch(`${API_URL}/drivers/vehicle-assignments`, {
+            method: "POST",
+            headers: this.headers(),
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const err = new Error("Failed to create vehicle assignment");
+            (err as Error & { status?: number; data?: unknown }).status = response.status;
+            (err as Error & { status?: number; data?: unknown }).data = errorData;
+            throw err;
+        }
+        return response.json();
+    }
+
+    async updateVehicleAssignment(
+        assignmentId: string,
+        data: {
+            license_plate?: string;
+            start_at?: string;
+            end_at?: string;
+            acknowledge_overlap?: boolean;
+        }
+    ) {
+        const response = await fetch(`${API_URL}/drivers/vehicle-assignments/${assignmentId}`, {
+            method: "PATCH",
+            headers: this.headers(),
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const err = new Error("Failed to update vehicle assignment");
+            (err as Error & { status?: number; data?: unknown }).status = response.status;
+            (err as Error & { status?: number; data?: unknown }).data = errorData;
+            throw err;
+        }
+        return response.json();
+    }
+
+    async searchVehicleAssignments(params: { license_plate?: string; driver_name?: string }) {
+        const query = new URLSearchParams();
+        if (params.license_plate) query.set("license_plate", params.license_plate);
+        if (params.driver_name) query.set("driver_name", params.driver_name);
+
+        const response = await fetch(`${API_URL}/drivers/vehicle-assignments/search?${query.toString()}`, {
+            headers: this.headers(),
+        });
+        if (!response.ok) throw new Error("Failed to search assignments");
+        return response.json();
+    }
+
+    async swapVehicle(
+        driverId: string,
+        data: {
+            new_license_plate: string;
+            start_at?: string;
+            acknowledge_overlap?: boolean;
+        }
+    ) {
+        const response = await fetch(`${API_URL}/drivers/${driverId}/swap-vehicle`, {
+            method: "POST",
+            headers: this.headers(),
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const err = new Error("Failed to swap vehicle");
+            (err as Error & { status?: number; data?: unknown }).status = response.status;
+            (err as Error & { status?: number; data?: unknown }).data = errorData;
+            throw err;
+        }
         return response.json();
     }
 
     // Applications
-    async getApplications(status?: string) {
-        const url = status ? `${API_URL}/applications?status=${status}` : `${API_URL}/applications`;
+    async getApplications(statusFilter?: string) {
+        const url = statusFilter
+            ? `${API_URL}/applications?status_filter=${encodeURIComponent(statusFilter)}`
+            : `${API_URL}/applications`;
         const response = await fetch(url, { headers: this.headers() });
-        if (!response.ok) throw new Error('Failed to fetch applications');
+        if (!response.ok) throw new Error("Failed to fetch applications");
         return response.json();
     }
 
     async getApplication(id: string) {
         const response = await fetch(`${API_URL}/applications/${id}`, { headers: this.headers() });
-        if (!response.ok) throw new Error('Failed to fetch application');
+        if (!response.ok) throw new Error("Failed to fetch application");
         return response.json();
     }
 
     async updateApplicationStatus(id: string, status: string, message?: string) {
         const response = await fetch(`${API_URL}/applications/${id}/status`, {
-            method: 'PATCH',
+            method: "PATCH",
             headers: this.headers(),
             body: JSON.stringify({ status, message }),
         });
-        if (!response.ok) throw new Error('Failed to update status');
+        if (!response.ok) throw new Error("Failed to update status");
         return response.json();
     }
 
     async addComment(applicationId: string, content: string) {
         const response = await fetch(`${API_URL}/applications/${applicationId}/comment`, {
-            method: 'POST',
+            method: "POST",
             headers: this.headers(),
             body: JSON.stringify({ content }),
         });
-        if (!response.ok) throw new Error('Failed to add comment');
+        if (!response.ok) throw new Error("Failed to add comment");
         return response.json();
     }
 
     // Payments
     async getUnrecognizedPayments() {
         const response = await fetch(`${API_URL}/payments/unrecognized`, { headers: this.headers() });
-        if (!response.ok) throw new Error('Failed to fetch payments');
+        if (!response.ok) throw new Error("Failed to fetch payments");
         return response.json();
     }
 
     async getPaymentStats(period?: string) {
         const url = period ? `${API_URL}/payments/stats?period=${period}` : `${API_URL}/payments/stats`;
         const response = await fetch(url, { headers: this.headers() });
-        if (!response.ok) throw new Error('Failed to fetch stats');
+        if (!response.ok) throw new Error("Failed to fetch stats");
         return response.json();
     }
 
     async assignPayment(paymentId: string, driverId: string, createAlias: boolean = true) {
         const response = await fetch(`${API_URL}/payments/${paymentId}/assign`, {
-            method: 'POST',
+            method: "POST",
             headers: this.headers(),
             body: JSON.stringify({ driver_id: driverId, create_alias: createAlias }),
         });
-        if (!response.ok) throw new Error('Failed to assign payment');
+        if (!response.ok) throw new Error("Failed to assign payment");
         return response.json();
     }
 
     // System Status
     async getSystemStatus() {
         const response = await fetch(`${API_URL}/status`, { headers: this.headers() });
-        if (!response.ok) throw new Error('Failed to fetch status');
+        if (!response.ok) throw new Error("Failed to fetch status");
         return response.json();
     }
 
     // SMS
     async sendSms(phone: string, message: string) {
         const response = await fetch(`${API_URL}/sms/send`, {
-            method: 'POST',
+            method: "POST",
             headers: this.headers(),
             body: JSON.stringify({ phone, message }),
         });
-        if (!response.ok) throw new Error('Failed to send SMS');
+        if (!response.ok) throw new Error("Failed to send SMS");
         return response.json();
     }
 }
