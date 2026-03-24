@@ -312,14 +312,17 @@ export default function DriverDetail() {
     const [applicationInfoError, setApplicationInfoError] = useState("");
 
     useEffect(() => {
-        if (id) loadData();
+        if (id) loadData({ showSpinner: true });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
 
-    async function loadData() {
+    async function loadData(options?: { showSpinner?: boolean }) {
         if (!id) return;
+        const showSpinner = options?.showSpinner ?? false;
         try {
-            setLoading(true);
+            if (showSpinner) {
+                setLoading(true);
+            }
             const [driverData, ledgerData, aliasData, assignmentData, portalData] = await Promise.all([
                 api.getDriver(id),
                 api.getDriverLedger(id),
@@ -356,7 +359,9 @@ export default function DriverDetail() {
         } catch (error) {
             console.error("Failed to load driver details:", error);
         } finally {
-            setLoading(false);
+            if (showSpinner) {
+                setLoading(false);
+            }
         }
     }
 
@@ -706,7 +711,7 @@ export default function DriverDetail() {
     }> = [
         {
             status: "active",
-            label: "Resume",
+            label: "Active",
             activeBg: "#D4EDDA",
             activeBorder: "#58b56a",
             activeText: "#155724",
@@ -977,7 +982,7 @@ export default function DriverDetail() {
                                     opacity: busy ? 0.75 : 1,
                                 }}
                             >
-                                {item.label}{isCurrent ? " (Current)" : ""}
+                                {item.label}
                             </button>
                         );
                     })}
