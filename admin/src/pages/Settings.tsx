@@ -11,21 +11,30 @@ interface SystemStatus {
 export default function Settings() {
     const { user } = useAuth();
     const [status, setStatus] = useState<SystemStatus | null>(null);
-    const [loading, setLoading] = useState(true);
+    const [initialLoading, setInitialLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
 
     useEffect(() => {
-        loadStatus();
+        loadStatus(false);
     }, []);
 
-    async function loadStatus() {
-        setLoading(true);
+    async function loadStatus(asRefresh: boolean) {
+        if (asRefresh) {
+            setRefreshing(true);
+        } else {
+            setInitialLoading(true);
+        }
         try {
             const data = await api.getSystemStatus();
             setStatus(data);
         } catch (error) {
             console.error('Failed to load status:', error);
         } finally {
-            setLoading(false);
+            if (asRefresh) {
+                setRefreshing(false);
+            } else {
+                setInitialLoading(false);
+            }
         }
     }
 
@@ -146,24 +155,30 @@ export default function Settings() {
                         }}>
                             System Status
                         </h3>
-                        {!loading && (
-                            <button
-                                onClick={loadStatus}
-                                style={{
-                                    marginLeft: 'var(--space-2)',
-                                    background: 'var(--light-gray)',
-                                    border: '1px solid var(--medium-gray)',
-                                    borderRadius: 'var(--radius-small)',
-                                    padding: '4px 8px',
-                                    color: 'var(--primary-blue)',
-                                    cursor: 'pointer',
-                                    fontSize: '0.75rem',
-                                }}
-                            >
-                                Refresh
-                            </button>
-                        )}
+                        <button
+                            onClick={() => loadStatus(true)}
+                            disabled={refreshing}
+                            style={{
+                                marginLeft: 'var(--space-2)',
+                                background: refreshing ? 'var(--medium-gray)' : 'var(--light-gray)',
+                                border: '1px solid var(--medium-gray)',
+                                borderRadius: 'var(--radius-small)',
+                                padding: '4px 8px',
+                                color: refreshing ? 'var(--dark-gray)' : 'var(--primary-blue)',
+                                cursor: refreshing ? 'not-allowed' : 'pointer',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                                opacity: refreshing ? 0.8 : 1,
+                            }}
+                        >
+                            {refreshing ? 'Refreshing...' : 'Refresh'}
+                        </button>
                     </div>
+                    {refreshing && (
+                        <div style={{ marginBottom: 'var(--space-2)', fontSize: '0.75rem', color: 'var(--dark-gray)', opacity: 0.75 }}>
+                            Updating all integration statuses...
+                        </div>
+                    )}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: 'var(--dark-gray)' }}>Backend API</span>
@@ -180,15 +195,15 @@ export default function Settings() {
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: 'var(--dark-gray)' }}>Database</span>
-                            {getStatusBadge(status?.database)}
+                            {getStatusBadge(initialLoading ? undefined : status?.database)}
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: 'var(--dark-gray)' }}>Gmail API</span>
-                            {getStatusBadge(status?.gmail)}
+                            {getStatusBadge(initialLoading ? undefined : status?.gmail)}
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: 'var(--dark-gray)' }}>OpenPhone SMS</span>
-                            {getStatusBadge(status?.openphone)}
+                            {getStatusBadge(initialLoading ? undefined : status?.openphone)}
                         </div>
                     </div>
                 </div>
