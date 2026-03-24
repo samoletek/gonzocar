@@ -172,7 +172,9 @@ def list_applications(
         applications = query.order_by(Application.created_at.desc()).offset(offset).limit(page_size).all()
         result = [_serialize_application(app, db) for app in applications]
 
-        counts_query = _base_applications_query(db, exclude_linked_drivers)
+        # Stats cards should reflect full application funnel, including approved
+        # records already linked to drivers.
+        counts_query = _base_applications_query(db, False)
         counts = _build_counts(counts_query)
 
         return {

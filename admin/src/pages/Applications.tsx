@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import api from "../services/api";
 
@@ -36,6 +36,7 @@ const EMPTY_COUNTS: Record<string, number> = {
 };
 
 export default function Applications() {
+    const navigate = useNavigate();
     const [applications, setApplications] = useState<Application[]>([]);
     const [counts, setCounts] = useState<Record<string, number>>(EMPTY_COUNTS);
     const [loading, setLoading] = useState(true);
@@ -139,14 +140,21 @@ export default function Applications() {
                 }}
             >
                 {[
-                    { key: "", label: "All", count: counts.all || 0 },
-                    { key: "pending", label: "Pending", count: counts.pending || 0 },
-                    { key: "approved", label: "Approved", count: counts.approved || 0 },
-                    { key: "declined", label: "Declined", count: counts.declined || 0 },
+                    { key: "", label: "All", count: counts.all || 0, clickable: true },
+                    { key: "pending", label: "Pending", count: counts.pending || 0, clickable: true },
+                    { key: "approved", label: "Approved", count: counts.approved || 0, clickable: true },
+                    { key: "declined", label: "Declined", count: counts.declined || 0, clickable: true },
                 ].map((item) => (
                     <button
                         key={item.key}
-                        onClick={() => changeFilter(item.key)}
+                        onClick={() => {
+                            if (item.key === "approved") {
+                                navigate("/drivers");
+                                return;
+                            }
+                            changeFilter(item.key);
+                        }}
+                        title={item.key === "approved" ? "Open Drivers" : undefined}
                         style={{
                             padding: "var(--space-3)",
                             background: filter === item.key ? "var(--primary-blue)" : "var(--white)",
