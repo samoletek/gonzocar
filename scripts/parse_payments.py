@@ -157,6 +157,16 @@ def run_with_gmail(hours: int = 1) -> bool:
     
     try:
         gmail = GmailService()
+        try:
+            profile = gmail.service.users().getProfile(userId='me').execute()
+            connected_email = profile.get('emailAddress')
+            if connected_email:
+                print(f"Connected to Gmail API as {connected_email}")
+            else:
+                print("Connected to Gmail API")
+        except Exception:
+            print("Connected to Gmail API")
+
         emails = gmail.fetch_emails(since_hours=hours, max_results=50)
         
         print(f"Found {len(emails)} payment emails")
