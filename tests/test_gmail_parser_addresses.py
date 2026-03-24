@@ -1,9 +1,19 @@
 import unittest
+from email.message import EmailMessage
 
-from app.services.gmail_parser import ZelleParser
+from app.services.gmail_parser import ZelleParser, parse_email
 
 
 class GmailParserAddressTests(unittest.TestCase):
+    @staticmethod
+    def _raw_email(from_addr: str, subject: str, body: str) -> bytes:
+        msg = EmailMessage()
+        msg["From"] = from_addr
+        msg["To"] = "gonzobilling@gmail.com"
+        msg["Subject"] = subject
+        msg.set_content(body)
+        return msg.as_bytes()
+
     def test_zelle_can_parse_direct_chase_sender(self):
         self.assertTrue(
             ZelleParser.can_parse(
@@ -27,6 +37,18 @@ class GmailParserAddressTests(unittest.TestCase):
                 "Monthly report",
             )
         )
+
+    def test_forwarded_non_zelle_sender_can_parse_venmo_subject(self):
+        raw = self._raw_email(
+            from_addr="Gonzo Pay <gonzopay@gonzocar.com>",
+            subject="Jonathan Johnson paid you $600.00",
+            body="Payment notification",
+        )
+        parsed = parse_email(raw)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.source, "venmo")
+        self.assertEqual(parsed.sender_name, "Jonathan Johnson")
+        self.assertEqual(parsed.amount, 600.0)
 
 
 if __name__ == "__main__":

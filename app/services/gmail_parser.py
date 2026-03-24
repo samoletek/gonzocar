@@ -17,13 +17,6 @@ from datetime import datetime
 from typing import Optional
 from dataclasses import dataclass
 
-ZELLE_FORWARDING_INBOXES = {
-    'payashwood@gonzocar.com',
-    'paysilver@gonzocar.com',
-    'payevergreen@gonzocar.com',
-    'gonzopay@gonzocar.com',
-}
-
 
 @dataclass
 class ParsedPayment:
@@ -84,13 +77,7 @@ class ZelleParser:
     
     @staticmethod
     def can_parse(from_addr: str, subject: str) -> bool:
-        from_lower = from_addr.lower()
-        subject_lower = subject.lower()
-        if 'zelle' not in subject_lower:
-            return False
-        if 'chase.com' in from_lower:
-            return True
-        return any(inbox in from_lower for inbox in ZELLE_FORWARDING_INBOXES)
+        return 'zelle' in subject.lower()
     
     @staticmethod
     def parse(msg: email.message.Message, body: str) -> Optional[ParsedPayment]:
@@ -467,10 +454,22 @@ def parse_email(raw_email: bytes) -> Optional[ParsedPayment]:
         subject = msg.get('Subject', '')
         body = decode_email_content(msg)
         
-        # Find appropriate parser
+        # Prefer parser selected by declared sender/subject first.
+        attempted = set()
         for parser_class in PARSERS:
             if parser_class.can_parse(from_addr, subject):
-                return parser_class.parse(msg, body)
+                attempted.add(parser_class)
+                parsed = parser_class.parse(msg, body)
+                if parsed:
+                    return parsed
+        
+        # Fallback for forwarded/rewritten emails where "From" changed.
+        for parser_class in PARSERS:
+            if parser_class in attempted:
+                continue
+            parsed = parser_class.parse(msg, body)
+            if parsed:
+                return parsed
         
         return None  # No parser matched
         

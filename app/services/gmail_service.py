@@ -24,14 +24,17 @@ from googleapiclient.discovery import build
 # Gmail API scopes
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
-# Payment senders to filter emails
+# Payment provider senders
 PAYMENT_SENDERS = [
     'no.reply.alerts@chase.com',  # Zelle
     'cash@square.com',             # CashApp
     'venmo@venmo.com',             # Venmo
     'alerts@account.chime.com',    # Chime
     'notifications@stripe.com',    # Stripe
-    # Zelle destination inboxes (some notifications can arrive forwarded)
+]
+
+# Recipient inboxes used for incoming payments
+PAYMENT_INBOXES = [
     'payashwood@gonzocar.com',
     'paysilver@gonzocar.com',
     'payevergreen@gonzocar.com',
@@ -121,11 +124,13 @@ class GmailService:
         since = datetime.utcnow() - timedelta(hours=since_hours)
         date_str = since.strftime('%Y/%m/%d')
         
-        # Build sender filter (OR between all payment senders)
+        # Build sender filter (OR between known payment providers)
         sender_queries = [f'from:{sender}' for sender in PAYMENT_SENDERS]
-        sender_filter = ' OR '.join(sender_queries)
+        recipient_queries = [f'to:{addr}' for addr in PAYMENT_INBOXES]
+        delivered_queries = [f'deliveredto:{addr}' for addr in PAYMENT_INBOXES]
+        address_filter = ' OR '.join(sender_queries + recipient_queries + delivered_queries)
         
-        return f'({sender_filter}) after:{date_str}'
+        return f'({address_filter}) after:{date_str}'
     
     def fetch_emails(self, since_hours: int = 1, max_results: int = 50) -> List[dict]:
         """
