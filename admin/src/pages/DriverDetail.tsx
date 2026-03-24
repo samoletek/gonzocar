@@ -104,6 +104,151 @@ function stringifyProfileValue(value: unknown): string {
     }
 }
 
+function looksLikeHttpUrl(value: string): boolean {
+    try {
+        const parsed = new URL(value);
+        return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+        return false;
+    }
+}
+
+function normalizeDisplayText(value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+
+    // Normalize comma-separated text that comes from form joins like "Uber,Uber eats,lyft".
+    if (trimmed.includes(",") && !trimmed.includes(", ")) {
+        const parts = trimmed
+            .split(",")
+            .map((part) => part.trim())
+            .filter(Boolean);
+        if (parts.length > 1) {
+            return parts.join(", ");
+        }
+    }
+
+    return trimmed;
+}
+
+function getStringValue(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const normalized = normalizeDisplayText(value);
+    return normalized || null;
+}
+
+function renderApplicationValue(value: unknown, depth = 0): React.ReactNode {
+    if (value === null || value === undefined || value === "") {
+        return "-";
+    }
+
+    if (typeof value === "boolean") {
+        return value ? "Yes" : "No";
+    }
+
+    if (typeof value === "number") {
+        return Number.isFinite(value) ? value.toLocaleString() : String(value);
+    }
+
+    if (typeof value === "string") {
+        const normalized = normalizeDisplayText(value);
+        if (!normalized) return "-";
+
+        // If a JSON string slipped into storage, render it as structured content.
+        if ((normalized.startsWith("{") && normalized.endsWith("}")) || (normalized.startsWith("[") && normalized.endsWith("]"))) {
+            try {
+                const parsed = JSON.parse(normalized);
+                return renderApplicationValue(parsed, depth + 1);
+            } catch {
+                // Keep raw text if this is not actually valid JSON.
+            }
+        }
+
+        if (looksLikeHttpUrl(normalized)) {
+            return (
+                <a href={normalized} target="_blank" rel="noreferrer" style={{ color: "var(--primary-blue)" }}>
+                    {normalized}
+                </a>
+            );
+        }
+
+        return normalized;
+    }
+
+    if (Array.isArray(value)) {
+        if (value.length === 0) return "-";
+
+        return (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                {value.map((item, index) => (
+                    <div key={index} style={{ display: "grid", gridTemplateColumns: "16px 1fr", gap: "8px", alignItems: "start" }}>
+                        <span style={{ opacity: 0.55, fontSize: "0.75rem", lineHeight: 1.5 }}>{index + 1}.</span>
+                        <div style={{ wordBreak: "break-word" }}>{renderApplicationValue(item, depth + 1)}</div>
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    if (typeof value === "object") {
+        const objectValue = value as Record<string, unknown>;
+        const entries = Object.entries(objectValue);
+        if (entries.length === 0) return "-";
+
+        const firstName = getStringValue(objectValue.first_name ?? objectValue.firstname ?? objectValue.first);
+        const lastName = getStringValue(objectValue.last_name ?? objectValue.lastname ?? objectValue.last);
+        if (firstName || lastName) {
+            const fullName = [firstName, lastName].filter(Boolean).join(" ");
+            if (fullName) {
+                return fullName;
+            }
+        }
+
+        const addressLine1 = getStringValue(objectValue.address_line_1 ?? objectValue.address1 ?? objectValue.street);
+        const addressLine2 = getStringValue(objectValue.address_line_2 ?? objectValue.address2);
+        const city = getStringValue(objectValue.city);
+        const state = getStringValue(objectValue.state);
+        const zip = getStringValue(objectValue.zip ?? objectValue.zip_code ?? objectValue.postal_code);
+        const cityStateZip = [city, state].filter(Boolean).join(", ") + ((city || state) && zip ? ` ${zip}` : zip ? `${zip}` : "");
+        const hasAddressShape = Boolean(addressLine1 || addressLine2 || city || state || zip);
+        if (hasAddressShape) {
+            const lines = [addressLine1, addressLine2, cityStateZip].filter((line): line is string => Boolean(line));
+            if (lines.length > 0) {
+                return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        {lines.map((line, index) => (
+                            <div key={`${line}-${index}`}>{line}</div>
+                        ))}
+                    </div>
+                );
+            }
+        }
+
+        if (depth >= 2) {
+            return (
+                <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: "0.8rem" }}>
+                    {JSON.stringify(objectValue, null, 2)}
+                </pre>
+            );
+        }
+
+        return (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                {entries.map(([childKey, childValue]) => (
+                    <div key={childKey} style={{ display: "grid", gridTemplateColumns: "minmax(110px, 160px) 1fr", gap: "8px" }}>
+                        <div style={{ fontSize: "0.72rem", opacity: 0.6, textTransform: "uppercase" }}>
+                            {getFieldLabel(childKey)}
+                        </div>
+                        <div style={{ wordBreak: "break-word" }}>{renderApplicationValue(childValue, depth + 1)}</div>
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    return String(value);
+}
+
 function toDateTimeLocal(value?: string | null): string {
     if (!value) return "";
     const date = new Date(value);
@@ -918,17 +1063,7 @@ export default function DriverDetail() {
                                         )
                                     ) : (
                                         <div style={{ fontWeight: 500, wordBreak: "break-word" }}>
-                                            {typeof value === "string" && value.startsWith("http") ? (
-                                                <a href={value} target="_blank" rel="noreferrer" style={{ color: "var(--primary-blue)" }}>
-                                                    {value}
-                                                </a>
-                                            ) : typeof value === "object" && value !== null ? (
-                                                <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: "0.8rem" }}>
-                                                    {JSON.stringify(value, null, 2)}
-                                                </pre>
-                                            ) : (
-                                                String(value ?? "-")
-                                            )}
+                                            {renderApplicationValue(value)}
                                         </div>
                                     )}
                                 </div>
