@@ -171,24 +171,42 @@ class GmailService:
         """
         if not self.service:
             raise RuntimeError("Gmail service not authenticated")
+        if max_results <= 0:
+            return []
         
         query = self._build_query(since_hours)
         
         try:
-            # Search for emails
-            results = self.service.users().messages().list(
-                userId='me',
-                q=query,
-                maxResults=max_results
-            ).execute()
-            
-            messages = results.get('messages', [])
             emails = []
-            
-            for msg in messages:
-                email_data = self._get_email_content(msg['id'])
-                if email_data:
-                    emails.append(email_data)
+            page_token = None
+
+            while len(emails) < max_results:
+                remaining = max_results - len(emails)
+                batch_size = min(500, remaining)
+                query_kwargs = {
+                    'userId': 'me',
+                    'q': query,
+                    'maxResults': batch_size,
+                }
+                if page_token:
+                    query_kwargs['pageToken'] = page_token
+
+                results = self.service.users().messages().list(**query_kwargs).execute()
+                messages = results.get('messages', [])
+
+                if not messages:
+                    break
+
+                for msg in messages:
+                    email_data = self._get_email_content(msg['id'])
+                    if email_data:
+                        emails.append(email_data)
+                    if len(emails) >= max_results:
+                        break
+
+                page_token = results.get('nextPageToken')
+                if not page_token:
+                    break
             
             return emails
             

@@ -18,6 +18,7 @@ Crontab (every 5 min):
 
 import sys
 import os
+import math
 from datetime import datetime
 from uuid import uuid4
 
@@ -135,7 +136,29 @@ def process_email(db: Session, raw_email: bytes, gmail_id: str = None) -> bool:
     return result is not None
 
 
-def run_with_gmail(hours: int = 1) -> bool:
+def get_last_payment_created_at(db: Session):
+    """Return latest created_at from payments_raw, if any."""
+    row = db.query(PaymentRaw.created_at).order_by(PaymentRaw.created_at.desc()).first()
+    if not row:
+        return None
+    return row[0]
+
+
+def compute_backfill_hours(last_created_at: datetime, min_hours: int = 1, safety_hours: int = 1) -> int:
+    """Compute lookback window from last parsed payment to now."""
+    if not last_created_at:
+        return max(1, min_hours)
+
+    now = datetime.utcnow()
+    reference = last_created_at
+    if reference.tzinfo is not None:
+        reference = reference.replace(tzinfo=None)
+
+    delta_hours = max(0.0, (now - reference).total_seconds() / 3600.0)
+    return max(min_hours, math.ceil(delta_hours) + max(0, safety_hours))
+
+
+def run_with_gmail(hours: int = 1, max_results: int = 50) -> bool:
     """Fetch and process emails from Gmail API."""
     try:
         from app.services.gmail_service import GmailService
@@ -152,7 +175,7 @@ def run_with_gmail(hours: int = 1) -> bool:
         print("Set GMAIL_CREDENTIALS/GMAIL_TOKEN or provide credentials.json + token.json.")
         return False
     
-    print(f"[{datetime.now()}] Starting payment email parser (looking back {hours} hours)")
+    print(f"[{datetime.now()}] Starting payment email parser (looking back {hours} hours, max {max_results} emails)")
     print("Connecting to Gmail API...")
     
     try:
@@ -167,7 +190,7 @@ def run_with_gmail(hours: int = 1) -> bool:
         except Exception:
             print("Connected to Gmail API")
 
-        emails = gmail.fetch_emails(since_hours=hours, max_results=50)
+        emails = gmail.fetch_emails(since_hours=hours, max_results=max_results)
         
         print(f"Found {len(emails)} payment emails")
         
@@ -239,9 +262,26 @@ if __name__ == "__main__":
                 hours = int(sys.argv[idx + 1])
             except (ValueError, IndexError):
                 print("Invalid --hours argument, defaulting to 1 hour")
-        
+
+        max_results = 50
+        if '--from-last' in sys.argv:
+            db = get_db()
+            try:
+                last_created_at = get_last_payment_created_at(db)
+            finally:
+                db.close()
+
+            if last_created_at:
+                computed_hours = compute_backfill_hours(last_created_at, min_hours=hours, safety_hours=1)
+                print(f"Last parsed payment was at {last_created_at.isoformat()}")
+                print(f"Using backfill window of {computed_hours} hours from last parsed payment")
+                hours = computed_hours
+                max_results = 2000
+            else:
+                print("No existing parsed payments found. Using default window.")
+
         # Production mode: fetch from Gmail
-        success = run_with_gmail(hours=hours)
+        success = run_with_gmail(hours=hours, max_results=max_results)
 
     if not success:
         sys.exit(1)
