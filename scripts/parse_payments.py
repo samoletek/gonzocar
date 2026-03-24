@@ -135,25 +135,22 @@ def process_email(db: Session, raw_email: bytes, gmail_id: str = None) -> bool:
     return result is not None
 
 
-def run_with_gmail(hours: int = 1):
+def run_with_gmail(hours: int = 1) -> bool:
     """Fetch and process emails from Gmail API."""
     try:
         from app.services.gmail_service import GmailService
     except ImportError as e:
         print(f"Gmail service import error: {e}")
         print("Install with: pip install google-auth-oauthlib google-api-python-client")
-        return
-    
-    # Check for credentials
-    if not os.path.exists('credentials.json'):
-        print("Error: credentials.json not found")
-        print("Download from Google Cloud Console")
-        return
-    
-    if not os.path.exists('token.json'):
-        print("Error: token.json not found")
-        print("Run: python app/services/gmail_service.py")
-        return
+        return False
+
+    # Credentials can come from env (base64/raw JSON) or local files.
+    has_env_credentials = bool(os.getenv('GMAIL_CREDENTIALS')) and bool(os.getenv('GMAIL_TOKEN'))
+    has_file_credentials = os.path.exists('credentials.json') and os.path.exists('token.json')
+    if not (has_env_credentials or has_file_credentials):
+        print("Error: Gmail credentials are not configured.")
+        print("Set GMAIL_CREDENTIALS/GMAIL_TOKEN or provide credentials.json + token.json.")
+        return False
     
     print(f"[{datetime.now()}] Starting payment email parser (looking back {hours} hours)")
     print("Connecting to Gmail API...")
@@ -165,7 +162,7 @@ def run_with_gmail(hours: int = 1):
         print(f"Found {len(emails)} payment emails")
         
         if not emails:
-            return
+            return True
         
         db = get_db()
         processed = 0
@@ -178,15 +175,17 @@ def run_with_gmail(hours: int = 1):
             
             db.commit()
             print(f"\nDone! Processed {processed} new payments")
+            return True
             
         finally:
             db.close()
             
     except Exception as e:
         print(f"Error: {e}")
+        return False
 
 
-def run_with_local_files(directory: str):
+def run_with_local_files(directory: str) -> bool:
     """Process .eml files from a local directory (for testing)."""
     from pathlib import Path
     
@@ -196,7 +195,7 @@ def run_with_local_files(directory: str):
     print(f"Found {len(eml_files)} .eml files")
     
     if not eml_files:
-        return
+        return True
     
     db = get_db()
     processed = 0
@@ -210,15 +209,17 @@ def run_with_local_files(directory: str):
         
         db.commit()
         print(f"\nDone! Processed {processed} new payments")
+        return True
         
     finally:
         db.close()
 
 
 if __name__ == "__main__":
+    success = False
     if len(sys.argv) > 1 and sys.argv[1].endswith('.eml'):
         # Process local directory/files (legacy support)
-        run_with_local_files(sys.argv[1])
+        success = run_with_local_files(sys.argv[1])
     else:
         # Check for --hours argument
         hours = 1
@@ -230,4 +231,7 @@ if __name__ == "__main__":
                 print("Invalid --hours argument, defaulting to 1 hour")
         
         # Production mode: fetch from Gmail
-        run_with_gmail(hours=hours)
+        success = run_with_gmail(hours=hours)
+
+    if not success:
+        sys.exit(1)

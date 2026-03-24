@@ -5,7 +5,8 @@ Connects to Gmail API to fetch payment notification emails.
 Requires OAuth credentials from Google Cloud Console.
 
 For production (Railway):
-    Set GMAIL_CREDENTIALS and GMAIL_TOKEN env variables as base64-encoded JSON.
+    Set GMAIL_CREDENTIALS and GMAIL_TOKEN env variables
+    (base64-encoded JSON is preferred, raw JSON is also supported).
 
 For local development:
     Place credentials.json and token.json in project root.
@@ -42,21 +43,46 @@ PAYMENT_INBOXES = [
 ]
 
 
+def _parse_env_json(raw_value: str | None, env_name: str):
+    """Parse env value as base64 JSON (preferred) or raw JSON."""
+    if not raw_value:
+        return None
+
+    value = raw_value.strip()
+    if not value:
+        return None
+
+    # Fast path for plain JSON secrets.
+    if value.startswith('{'):
+        try:
+            return json.loads(value)
+        except Exception as e:
+            print(f"Error parsing {env_name} as JSON: {e}")
+            return None
+
+    # Preferred format: base64-encoded JSON.
+    try:
+        padded = value + ("=" * (-len(value) % 4))
+        decoded = base64.b64decode(padded).decode('utf-8')
+        return json.loads(decoded)
+    except Exception:
+        # Final fallback: maybe it was JSON not starting with "{" due to formatting.
+        try:
+            return json.loads(value)
+        except Exception as e:
+            print(f"Error decoding {env_name} from env: {e}")
+            return None
+
+
 def get_credentials_from_env():
     """Load credentials from environment variables (for production)."""
-    creds_b64 = os.getenv('GMAIL_CREDENTIALS')
-    token_b64 = os.getenv('GMAIL_TOKEN')
-    
-    if not creds_b64 or not token_b64:
+    creds_data = _parse_env_json(os.getenv('GMAIL_CREDENTIALS'), 'GMAIL_CREDENTIALS')
+    token_data = _parse_env_json(os.getenv('GMAIL_TOKEN'), 'GMAIL_TOKEN')
+
+    if not creds_data or not token_data:
         return None, None
-    
-    try:
-        creds_json = base64.b64decode(creds_b64).decode('utf-8')
-        token_json = base64.b64decode(token_b64).decode('utf-8')
-        return json.loads(creds_json), json.loads(token_json)
-    except Exception as e:
-        print(f"Error decoding credentials from env: {e}")
-        return None, None
+
+    return creds_data, token_data
 
 
 class GmailService:
