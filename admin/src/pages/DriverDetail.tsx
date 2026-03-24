@@ -1036,27 +1036,6 @@ export default function DriverDetail() {
                         );
                     })}
 
-                    <button
-                        disabled={busy}
-                        onClick={openDeleteDriverModal}
-                        style={{
-                            marginTop: "4px",
-                            padding: "8px 12px",
-                            background: "#F8D7DA",
-                            border: "1px solid #ca5f6b",
-                            borderRadius: "var(--radius-small)",
-                            color: "#721C24",
-                            fontWeight: 700,
-                            cursor: busy ? "not-allowed" : "pointer",
-                            opacity: busy ? 0.75 : 1,
-                        }}
-                    >
-                        Delete Driver
-                    </button>
-                    <div style={{ fontSize: "0.72rem", color: "var(--dark-gray)", opacity: 0.7 }}>
-                        Permanent action. Requires full-name confirmation.
-                    </div>
-
                     <hr style={{ border: "none", borderTop: "1px solid var(--light-gray)" }} />
                     <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>Driver Portal</div>
                     <div style={{ fontSize: "0.8rem", wordBreak: "break-all" }}>{portalUrl || "No link"}</div>
@@ -1093,22 +1072,39 @@ export default function DriverDetail() {
                         <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1rem", color: "var(--dark-gray)" }}>
                             Full Profile (Application Data)
                         </h3>
-                        <button
-                            onClick={() => {
-                                setIsEditingApplicationInfo((current) => !current);
-                                setApplicationInfoError("");
-                            }}
-                            style={{
-                                padding: "4px 10px",
-                                border: "1px solid var(--medium-gray)",
-                                borderRadius: "var(--radius-small)",
-                                background: "var(--light-gray)",
-                                color: "var(--dark-gray)",
-                                cursor: "pointer",
-                            }}
-                        >
-                            {isEditingApplicationInfo ? "Cancel" : "Edit"}
-                        </button>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <button
+                                disabled={busy}
+                                onClick={openDeleteDriverModal}
+                                style={{
+                                    padding: "4px 10px",
+                                    border: "1px solid #ca5f6b",
+                                    borderRadius: "var(--radius-small)",
+                                    background: "#F8D7DA",
+                                    color: "#721C24",
+                                    cursor: busy ? "not-allowed" : "pointer",
+                                    opacity: busy ? 0.75 : 1,
+                                }}
+                            >
+                                Delete
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setIsEditingApplicationInfo((current) => !current);
+                                    setApplicationInfoError("");
+                                }}
+                                style={{
+                                    padding: "4px 10px",
+                                    border: "1px solid var(--medium-gray)",
+                                    borderRadius: "var(--radius-small)",
+                                    background: "var(--light-gray)",
+                                    color: "var(--dark-gray)",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                {isEditingApplicationInfo ? "Cancel" : "Edit"}
+                            </button>
+                        </div>
                     </div>
 
                     {applicationInfoError && (
