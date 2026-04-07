@@ -50,6 +50,19 @@ class GmailParserAddressTests(unittest.TestCase):
         self.assertEqual(parsed.sender_name, "Jonathan Johnson")
         self.assertEqual(parsed.amount, 600.0)
 
+    def test_cashapp_payment_received_ignores_placeholder_transaction_id(self):
+        raw = self._raw_email(
+            from_addr="Cash App <cash@square.com>",
+            subject="Payment received",
+            body="You were sent $120 by Riva D Brewer. Memo: car payment #000000",
+        )
+        parsed = parse_email(raw)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.source, "cashapp")
+        self.assertEqual(parsed.amount, 120.0)
+        self.assertEqual(parsed.sender_name, "Riva D Brewer")
+        self.assertIsNone(parsed.transaction_id)
+
 
 if __name__ == "__main__":
     unittest.main()

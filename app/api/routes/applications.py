@@ -17,6 +17,7 @@ from app.models import (
     Ledger,
     Staff,
 )
+from app.services.billing import default_weekly_due_day, normalize_weekly_due_day
 from app.schemas import (
     ApplicationCreate, ApplicationResponse, ApplicationStatusUpdate,
     CommentCreate, CommentResponse
@@ -70,6 +71,13 @@ def _extract_driver_profile(form_data: dict[str, Any]) -> dict[str, Any]:
 
     billing_type_raw = str(form_data.get("billing_type") or "daily").strip().lower()
     billing_type = billing_type_raw if billing_type_raw in {"daily", "weekly"} else "daily"
+    weekly_due_day = None
+    if billing_type == "weekly":
+        raw_weekly_due_day = form_data.get("weekly_due_day")
+        if isinstance(raw_weekly_due_day, str):
+            weekly_due_day = normalize_weekly_due_day(raw_weekly_due_day)
+        if weekly_due_day is None:
+            weekly_due_day = default_weekly_due_day()
 
     try:
         billing_rate = float(form_data.get("billing_rate") or 0)
@@ -85,6 +93,7 @@ def _extract_driver_profile(form_data: dict[str, Any]) -> dict[str, Any]:
         "phone": phone,
         "billing_type": billing_type,
         "billing_rate": billing_rate,
+        "weekly_due_day": weekly_due_day,
     }
 
 
@@ -105,6 +114,7 @@ def _ensure_driver_for_application(application: Application, db: Session) -> Dri
         phone=profile["phone"],
         billing_type=profile["billing_type"],
         billing_rate=profile["billing_rate"],
+        weekly_due_day=profile.get("weekly_due_day"),
         billing_status=BillingStatus.active,
         billing_active=True,
         portal_token=uuid4().hex,

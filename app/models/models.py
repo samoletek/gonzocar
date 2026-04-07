@@ -70,6 +70,7 @@ class Driver(Base):
     address_encrypted = Column(LargeBinary, nullable=True)
     billing_type = Column(Enum(BillingType), default=BillingType.daily)
     billing_rate = Column(Numeric(10, 2), nullable=False)
+    weekly_due_day = Column(String(16), nullable=True)
     billing_active = Column(Boolean, default=True)
     billing_status = Column(Enum(BillingStatus), default=BillingStatus.active, nullable=False)
     deposit_required = Column(Numeric(10, 2), default=0)

@@ -42,6 +42,7 @@ class DriverBase(BaseModel):
     phone: str
     billing_type: str = "daily"
     billing_rate: float
+    weekly_due_day: Optional[str] = None
     billing_status: str = "active"
     deposit_required: float = 0.0
     deposit_posted: float = 0.0
@@ -59,6 +60,7 @@ class DriverUpdate(BaseModel):
     phone: Optional[str] = None
     billing_type: Optional[str] = None
     billing_rate: Optional[float] = None
+    weekly_due_day: Optional[str] = None
     billing_active: Optional[bool] = None
     billing_status: Optional[str] = None
     deposit_required: Optional[float] = None

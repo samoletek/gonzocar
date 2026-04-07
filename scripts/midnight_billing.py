@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Cron Job: Midnight Billing
+Cron Job: Billing
 
-Runs daily at midnight to:
+Runs automatically to:
 1. Create debit entries for active drivers based on their billing rate
 2. Detect late payments (daily: >= 2 days, weekly: >= 48 hours)
 3. Send SMS reminders for late payments
@@ -11,13 +11,13 @@ Runs daily at midnight to:
 Usage:
     python scripts/midnight_billing.py
 
-Crontab (daily at midnight):
-    0 0 * * * cd /path/to/gonzocar && python scripts/midnight_billing.py
+Crontab (hourly + guarded in code):
+    0 * * * * cd /path/to/gonzocar && python scripts/midnight_billing.py
 """
 
 import sys
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 from decimal import Decimal
 
@@ -33,6 +33,12 @@ from sqlalchemy import func, or_
 from app.core.database import SessionLocal
 from app.models import Driver, Ledger, SmsLog, LedgerType, BillingType, BillingStatus
 from app.services.openphone import openphone, SmsTemplates
+from app.services.billing import (
+    CHICAGO_TZ,
+    default_weekly_due_day,
+    is_charge_window,
+    normalize_weekly_due_day,
+)
 
 
 def get_db() -> Session:
@@ -65,10 +71,17 @@ def get_last_debit_date(db: Session, driver_id) -> datetime:
     return last_debit.created_at if last_debit else None
 
 
-def create_daily_debits(db: Session, drivers: list[Driver]) -> int:
-    """Create daily debit entries for drivers with daily billing."""
+def _date_in_chicago(value: datetime) -> datetime.date:
+    dt = value
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(CHICAGO_TZ).date()
+
+
+def create_daily_debits(db: Session, drivers: list[Driver], now_local: datetime) -> int:
+    """Create daily debit entries for drivers with daily billing at 5 PM Chicago."""
     count = 0
-    today = datetime.utcnow().date()
+    billing_date_local = now_local.date()
     
     for driver in drivers:
         if driver.billing_type != BillingType.daily:
@@ -76,7 +89,7 @@ def create_daily_debits(db: Session, drivers: list[Driver]) -> int:
         
         # Check if already charged today
         last_debit_date = get_last_debit_date(db, driver.id)
-        if last_debit_date and last_debit_date.date() == today:
+        if last_debit_date and _date_in_chicago(last_debit_date) == billing_date_local:
             continue
         
         # Create debit entry
@@ -95,18 +108,23 @@ def create_daily_debits(db: Session, drivers: list[Driver]) -> int:
     return count
 
 
-def create_weekly_debits(db: Session, drivers: list[Driver]) -> int:
-    """Create weekly debit entries for drivers with weekly billing."""
+def create_weekly_debits(db: Session, drivers: list[Driver], now_local: datetime) -> int:
+    """Create weekly debit entries for drivers with weekly billing at 5 PM Chicago."""
     count = 0
-    today = datetime.utcnow()
+    billing_date_local = now_local.date()
+    billing_weekday = now_local.strftime("%A").lower()
     
     for driver in drivers:
         if driver.billing_type != BillingType.weekly:
             continue
+
+        due_day = normalize_weekly_due_day(getattr(driver, "weekly_due_day", None)) or default_weekly_due_day()
+        if due_day != billing_weekday:
+            continue
         
         # Check if already charged this week
         last_debit_date = get_last_debit_date(db, driver.id)
-        if last_debit_date and (today - last_debit_date).days < 7:
+        if last_debit_date and _date_in_chicago(last_debit_date) == billing_date_local:
             continue
         
         # Create debit entry
@@ -115,7 +133,7 @@ def create_weekly_debits(db: Session, drivers: list[Driver]) -> int:
             driver_id=driver.id,
             type=LedgerType.debit,
             amount=driver.billing_rate,
-            description=f"Weekly rental charge",
+            description=f"Weekly rental charge ({due_day.title()})",
             created_at=datetime.utcnow()
         )
         db.add(debit)
@@ -209,7 +227,12 @@ def send_late_payment_sms(db: Session, driver: Driver, balance: Decimal, days_la
 
 def run_billing():
     """Main billing job."""
-    print(f"[{datetime.now()}] Starting midnight billing job")
+    print(f"[{datetime.now()}] Starting billing job")
+    now_local = datetime.now(CHICAGO_TZ)
+    print(f"Chicago local time: {now_local.isoformat()}")
+    if not is_charge_window(now_local, target_hour=17):
+        print("Outside 5 PM Chicago charge window. Skipping billing run.")
+        return
     
     db = get_db()
     
@@ -229,8 +252,8 @@ def run_billing():
         
         # Create debit entries
         print("\n--- Creating Debit Entries ---")
-        daily_count = create_daily_debits(db, drivers)
-        weekly_count = create_weekly_debits(db, drivers)
+        daily_count = create_daily_debits(db, drivers, now_local)
+        weekly_count = create_weekly_debits(db, drivers, now_local)
         print(f"Created {daily_count} daily debits, {weekly_count} weekly debits")
         
         # Check for late payments
@@ -259,7 +282,7 @@ def run_billing():
 
 def run_with_dry_run():
     """Dry run mode - show what would happen without making changes."""
-    print(f"[{datetime.now()}] DRY RUN - Midnight billing preview")
+    print(f"[{datetime.now()}] DRY RUN - Billing preview")
     
     db = get_db()
     

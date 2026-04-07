@@ -105,6 +105,7 @@ class ApiService {
         phone: string;
         billing_type: string;
         billing_rate: number;
+        weekly_due_day?: string | null;
         billing_status?: string;
         deposit_required?: number;
         deposit_posted?: number;

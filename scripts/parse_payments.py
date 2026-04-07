@@ -19,6 +19,7 @@ Crontab (every 5 min):
 import sys
 import os
 import math
+import re
 from datetime import datetime
 from uuid import uuid4
 
@@ -40,7 +41,7 @@ def get_db() -> Session:
 def is_duplicate(db: Session, source: str, transaction_id: str, gmail_id: str = None) -> bool:
     """Check if payment already exists in database."""
     # 1. Check by Transaction ID (if present)
-    if transaction_id:
+    if _is_reliable_transaction_id(transaction_id):
         existing = db.query(PaymentRaw).filter(
             PaymentRaw.source == source,
             PaymentRaw.transaction_id == transaction_id
@@ -57,6 +58,20 @@ def is_duplicate(db: Session, source: str, transaction_id: str, gmail_id: str = 
             return True
             
     return False
+
+
+def _is_reliable_transaction_id(transaction_id: str | None) -> bool:
+    """Skip placeholder transaction IDs that cause false duplicates."""
+    if not transaction_id:
+        return False
+    normalized = transaction_id.strip()
+    if not normalized:
+        return False
+    if normalized.lower() in {"none", "n/a", "na"}:
+        return False
+    if re.fullmatch(r"0+", normalized):
+        return False
+    return True
 
 
 def find_driver_by_alias(db: Session, sender_name: str, sender_identifier: str) -> Driver:

@@ -212,9 +212,16 @@ class CashAppParser:
                     pass
 
             # 3. Transaction ID
-            # Look for #D-XXXXXXXX
-            tx_match = re.search(r'#([A-Z0-9-]{4,})', body)
-            transaction_id = tx_match.group(1) if tx_match else None
+            tx_match = re.search(
+                r'(?:transaction(?:\s+id)?|payment(?:\s+id)?)\s*[:#]\s*([A-Z0-9-]{8,})',
+                body,
+                re.IGNORECASE,
+            )
+            if not tx_match:
+                tx_match = re.search(r'#D-([A-Z0-9-]{6,})', body, re.IGNORECASE)
+            transaction_id = tx_match.group(1).strip() if tx_match else None
+            if transaction_id and re.fullmatch(r'0+', transaction_id):
+                transaction_id = None
             
             # Validate
             if amount == 0.0 or sender_name == "Unknown":

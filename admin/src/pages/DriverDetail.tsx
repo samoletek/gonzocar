@@ -12,6 +12,7 @@ interface Driver {
     phone: string;
     billing_type: string;
     billing_rate: number;
+    weekly_due_day?: string | null;
     billing_active: boolean;
     billing_status: "active" | "paused" | "terminated";
     deposit_required: number;
@@ -64,9 +65,20 @@ interface ProfileForm {
     phone: string;
     billing_type: string;
     billing_rate: string;
+    weekly_due_day: string;
     deposit_required: string;
     deposit_posted: string;
 }
+
+const WEEKDAY_OPTIONS = [
+    { value: "monday", label: "Monday" },
+    { value: "tuesday", label: "Tuesday" },
+    { value: "wednesday", label: "Wednesday" },
+    { value: "thursday", label: "Thursday" },
+    { value: "friday", label: "Friday" },
+    { value: "saturday", label: "Saturday" },
+    { value: "sunday", label: "Sunday" },
+];
 
 interface ManualEntryForm {
     entry_type: "charge" | "credit";
@@ -291,6 +303,7 @@ export default function DriverDetail() {
         phone: "",
         billing_type: "daily",
         billing_rate: "",
+        weekly_due_day: "monday",
         deposit_required: "0",
         deposit_posted: "0",
     });
@@ -360,6 +373,7 @@ export default function DriverDetail() {
                 phone: driverData.phone ?? "",
                 billing_type: driverData.billing_type ?? "daily",
                 billing_rate: String(driverData.billing_rate ?? ""),
+                weekly_due_day: driverData.weekly_due_day ?? "monday",
                 deposit_required: String(driverData.deposit_required ?? 0),
                 deposit_posted: String(driverData.deposit_posted ?? 0),
             });
@@ -388,6 +402,7 @@ export default function DriverDetail() {
                 phone: profileForm.phone.trim(),
                 billing_type: profileForm.billing_type,
                 billing_rate: Number(profileForm.billing_rate || 0),
+                weekly_due_day: profileForm.billing_type === "weekly" ? profileForm.weekly_due_day : null,
                 deposit_required: Number(profileForm.deposit_required || 0),
                 deposit_posted: Number(profileForm.deposit_posted || 0),
                 deposit_updated_at: new Date().toISOString(),
@@ -907,7 +922,13 @@ export default function DriverDetail() {
                                 <select
                                     style={inputStyle}
                                     value={profileForm.billing_type}
-                                    onChange={(e) => setProfileForm((prev) => ({ ...prev, billing_type: e.target.value }))}
+                                    onChange={(e) =>
+                                        setProfileForm((prev) => ({
+                                            ...prev,
+                                            billing_type: e.target.value,
+                                            weekly_due_day: e.target.value === "weekly" ? prev.weekly_due_day || "monday" : prev.weekly_due_day,
+                                        }))
+                                    }
                                 >
                                     <option value="daily">Daily</option>
                                     <option value="weekly">Weekly</option>
@@ -923,6 +944,22 @@ export default function DriverDetail() {
                                     onChange={(e) => setProfileForm((prev) => ({ ...prev, billing_rate: e.target.value }))}
                                 />
                             </div>
+                            {profileForm.billing_type === "weekly" && (
+                                <div>
+                                    <div style={{ fontSize: "0.75rem", marginBottom: "4px" }}>Weekly Payment Due Day</div>
+                                    <select
+                                        style={inputStyle}
+                                        value={profileForm.weekly_due_day}
+                                        onChange={(e) => setProfileForm((prev) => ({ ...prev, weekly_due_day: e.target.value }))}
+                                    >
+                                        {WEEKDAY_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
                             <div>
                                 <div style={{ fontSize: "0.75rem", marginBottom: "4px" }}>Deposit Required</div>
                                 <input
@@ -974,6 +1011,11 @@ export default function DriverDetail() {
                                 <div>
                                     ${driver.billing_rate} / {driver.billing_type}
                                 </div>
+                                {driver.billing_type === "weekly" && (
+                                    <div style={{ fontSize: "0.75rem", opacity: 0.75, marginTop: "4px" }}>
+                                        Due Day: {driver.weekly_due_day ? `${driver.weekly_due_day.charAt(0).toUpperCase()}${driver.weekly_due_day.slice(1)}` : "-"}
+                                    </div>
+                                )}
                                 <div style={{ marginTop: "4px" }}>{renderBillingBadge(driver.billing_status)}</div>
                                 {driver.terminated_at && (
                                     <div style={{ fontSize: "0.75rem", color: "var(--error-red)", marginTop: "4px" }}>
@@ -1074,21 +1116,6 @@ export default function DriverDetail() {
                         </h3>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                             <button
-                                disabled={busy}
-                                onClick={openDeleteDriverModal}
-                                style={{
-                                    padding: "4px 10px",
-                                    border: "1px solid #ca5f6b",
-                                    borderRadius: "var(--radius-small)",
-                                    background: "#F8D7DA",
-                                    color: "#721C24",
-                                    cursor: busy ? "not-allowed" : "pointer",
-                                    opacity: busy ? 0.75 : 1,
-                                }}
-                            >
-                                Delete
-                            </button>
-                            <button
                                 onClick={() => {
                                     setIsEditingApplicationInfo((current) => !current);
                                     setApplicationInfoError("");
@@ -1103,6 +1130,21 @@ export default function DriverDetail() {
                                 }}
                             >
                                 {isEditingApplicationInfo ? "Cancel" : "Edit"}
+                            </button>
+                            <button
+                                disabled={busy}
+                                onClick={openDeleteDriverModal}
+                                style={{
+                                    padding: "4px 10px",
+                                    border: "1px solid #ca5f6b",
+                                    borderRadius: "var(--radius-small)",
+                                    background: "#F8D7DA",
+                                    color: "#721C24",
+                                    cursor: busy ? "not-allowed" : "pointer",
+                                    opacity: busy ? 0.75 : 1,
+                                }}
+                            >
+                                Delete
                             </button>
                         </div>
                     </div>

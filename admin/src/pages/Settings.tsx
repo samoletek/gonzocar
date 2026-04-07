@@ -246,11 +246,11 @@ export default function Settings() {
                                 </td>
                             </tr>
                             <tr style={{ borderTop: '1px solid var(--light-gray)' }}>
-                                <td style={{ padding: 'var(--space-2) var(--space-3)', fontWeight: 500, color: 'var(--dark-gray)' }}>Midnight Billing</td>
+                                <td style={{ padding: 'var(--space-2) var(--space-3)', fontWeight: 500, color: 'var(--dark-gray)' }}>Billing Charges</td>
                                 <td style={{ padding: 'var(--space-2) var(--space-3)' }}>
-                                    <code style={{ background: 'var(--light-gray)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', color: 'var(--dark-gray)' }}>0 0 * * *</code>
+                                    <code style={{ background: 'var(--light-gray)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', color: 'var(--dark-gray)' }}>0 * * * *</code>
                                 </td>
-                                <td style={{ padding: 'var(--space-2) var(--space-3)', color: 'var(--dark-gray)', fontSize: '0.875rem' }}>Create daily debits, check late payments, send SMS</td>
+                                <td style={{ padding: 'var(--space-2) var(--space-3)', color: 'var(--dark-gray)', fontSize: '0.875rem' }}>Generate charges at 5:00 PM Chicago, check late payments, send SMS</td>
                                 <td style={{ padding: 'var(--space-2) var(--space-3)' }}>
                                     <code style={{ color: 'var(--primary-blue)', fontSize: '0.75rem' }}>python scripts/midnight_billing.py</code>
                                 </td>

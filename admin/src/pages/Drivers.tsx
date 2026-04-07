@@ -10,6 +10,7 @@ interface Driver {
     phone: string;
     billing_type: string;
     billing_rate: number;
+    weekly_due_day?: string | null;
     billing_active: boolean;
     balance: number;
     created_at: string | null;
@@ -32,7 +33,18 @@ interface NewDriverForm {
     phone: string;
     billing_type: string;
     billing_rate: string;
+    weekly_due_day: string;
 }
+
+const WEEKDAY_OPTIONS = [
+    { value: "monday", label: "Monday" },
+    { value: "tuesday", label: "Tuesday" },
+    { value: "wednesday", label: "Wednesday" },
+    { value: "thursday", label: "Thursday" },
+    { value: "friday", label: "Friday" },
+    { value: "saturday", label: "Saturday" },
+    { value: "sunday", label: "Sunday" },
+];
 
 const emptyForm: NewDriverForm = {
     first_name: '',
@@ -41,6 +53,7 @@ const emptyForm: NewDriverForm = {
     phone: '',
     billing_type: 'daily',
     billing_rate: '',
+    weekly_due_day: 'monday',
 };
 
 export default function Drivers() {
@@ -130,6 +143,10 @@ export default function Drivers() {
             setError('Billing rate must be a positive number');
             return;
         }
+        if (form.billing_type === 'weekly' && !form.weekly_due_day) {
+            setError('Weekly payment due day is required for weekly billing');
+            return;
+        }
 
         setSubmitting(true);
         try {
@@ -140,6 +157,7 @@ export default function Drivers() {
                 phone: form.phone.trim(),
                 billing_type: form.billing_type,
                 billing_rate: Number(form.billing_rate),
+                weekly_due_day: form.billing_type === 'weekly' ? form.weekly_due_day : null,
             });
             closeModal();
             setPage(1);
@@ -581,7 +599,13 @@ export default function Drivers() {
                                     <select
                                         style={inputStyle}
                                         value={form.billing_type}
-                                        onChange={(e) => setForm({ ...form, billing_type: e.target.value })}
+                                        onChange={(e) =>
+                                            setForm({
+                                                ...form,
+                                                billing_type: e.target.value,
+                                                weekly_due_day: e.target.value === 'weekly' ? form.weekly_due_day || 'monday' : form.weekly_due_day,
+                                            })
+                                        }
                                     >
                                         <option value="daily">Daily</option>
                                         <option value="weekly">Weekly</option>
@@ -599,6 +623,22 @@ export default function Drivers() {
                                         placeholder="150.00"
                                     />
                                 </div>
+                                {form.billing_type === 'weekly' && (
+                                    <div>
+                                        <label style={labelStyle}>Weekly Payment Due Day *</label>
+                                        <select
+                                            style={inputStyle}
+                                            value={form.weekly_due_day}
+                                            onChange={(e) => setForm({ ...form, weekly_due_day: e.target.value })}
+                                        >
+                                            {WEEKDAY_OPTIONS.map((option) => (
+                                                <option key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
                             </div>
 
                             <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>

@@ -2,8 +2,8 @@ name: Midnight Billing
 
 on:
   schedule:
-    # Every day at midnight UTC
-    - cron: '0 0 * * *'
+    # Every hour. Script itself runs charges only at 5:00 PM America/Chicago.
+    - cron: '0 * * * *'
   workflow_dispatch: # Allow manual trigger
 
 env:
@@ -27,5 +27,5 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       
-      - name: Run midnight billing
+      - name: Run billing
         run: python scripts/midnight_billing.py

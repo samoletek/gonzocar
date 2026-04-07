@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import unittest
 
-from scripts.parse_payments import compute_backfill_hours
+from scripts.parse_payments import _is_reliable_transaction_id, compute_backfill_hours
 
 
 class ParsePaymentsBackfillTests(unittest.TestCase):
@@ -18,6 +18,13 @@ class ParsePaymentsBackfillTests(unittest.TestCase):
         aware = datetime.now(timezone.utc) - timedelta(hours=2, minutes=1)
         hours = compute_backfill_hours(aware, min_hours=1, safety_hours=1)
         self.assertGreaterEqual(hours, 3)
+
+    def test_transaction_id_reliability_filters_placeholders(self):
+        self.assertFalse(_is_reliable_transaction_id(None))
+        self.assertFalse(_is_reliable_transaction_id(""))
+        self.assertFalse(_is_reliable_transaction_id("000000"))
+        self.assertFalse(_is_reliable_transaction_id("0"))
+        self.assertTrue(_is_reliable_transaction_id("pi_123abc"))
 
 
 if __name__ == "__main__":

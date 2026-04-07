@@ -11,6 +11,7 @@ from app.models import (
     Application,
     Alias,
     AliasType,
+    BillingType,
     BillingStatus,
     Driver,
     DriverVehicleAssignment,
@@ -20,6 +21,7 @@ from app.models import (
     Staff,
     Vehicle,
 )
+from app.services.billing import default_weekly_due_day, normalize_weekly_due_day
 from app.schemas import (
     AliasCreate,
     AliasResponse,
@@ -91,6 +93,7 @@ def _serialize_driver(driver: Driver, balance: float = 0.0, application_info=Non
         "phone": driver.phone,
         "billing_type": driver.billing_type.value if driver.billing_type else "daily",
         "billing_rate": float(driver.billing_rate) if driver.billing_rate is not None else 0.0,
+        "weekly_due_day": driver.weekly_due_day,
         "billing_active": driver.billing_active if driver.billing_active is not None else True,
         "billing_status": driver.billing_status.value if driver.billing_status else "active",
         "deposit_required": float(driver.deposit_required or 0),
@@ -173,6 +176,24 @@ def _close_active_assignments(db: Session, driver_id: UUID, end_time: datetime) 
     ).all()
     for assignment in active_assignments:
         assignment.end_at = end_time if end_time >= assignment.start_at else assignment.start_at
+
+
+def _validate_billing_type(value: str | BillingType | None) -> BillingType:
+    if isinstance(value, BillingType):
+        return value
+    normalized = str(value or "daily").strip().lower()
+    if normalized not in {"daily", "weekly"}:
+        raise HTTPException(status_code=400, detail="Invalid billing_type")
+    return BillingType(normalized)
+
+
+def _resolve_weekly_due_day(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = normalize_weekly_due_day(value)
+    if normalized is None:
+        raise HTTPException(status_code=400, detail="weekly_due_day must be a valid weekday")
+    return normalized
 
 
 @router.get("", response_model=list[DriverResponse])
@@ -271,14 +292,19 @@ def create_driver(
     requested_status = request.billing_status or "active"
     if requested_status not in {"active", "paused", "terminated"}:
         raise HTTPException(status_code=400, detail="Invalid billing_status")
+    billing_type = _validate_billing_type(request.billing_type)
+    weekly_due_day = _resolve_weekly_due_day(request.weekly_due_day)
+    if billing_type == BillingType.weekly and not weekly_due_day:
+        weekly_due_day = default_weekly_due_day()
 
     driver = Driver(
         first_name=request.first_name,
         last_name=request.last_name,
         email=request.email,
         phone=request.phone,
-        billing_type=request.billing_type,
+        billing_type=billing_type,
         billing_rate=request.billing_rate,
+        weekly_due_day=weekly_due_day if billing_type == BillingType.weekly else None,
         billing_active=requested_status == "active",
         billing_status=BillingStatus(requested_status),
         deposit_required=request.deposit_required,
@@ -538,6 +564,12 @@ def update_driver(
     update_data = request.model_dump(exclude_unset=True)
     application_info_update = update_data.pop("application_info", None) if "application_info" in update_data else None
 
+    if "billing_type" in update_data:
+        driver.billing_type = _validate_billing_type(update_data.pop("billing_type"))
+
+    if "weekly_due_day" in update_data:
+        driver.weekly_due_day = _resolve_weekly_due_day(update_data.pop("weekly_due_day"))
+
     if "billing_status" in update_data:
         requested_status = update_data["billing_status"]
         if requested_status not in {"active", "paused", "terminated"}:
@@ -568,6 +600,12 @@ def update_driver(
             setattr(driver, field, _to_utc_naive(value))
         else:
             setattr(driver, field, value)
+
+    if driver.billing_type == BillingType.weekly:
+        if not driver.weekly_due_day:
+            driver.weekly_due_day = default_weekly_due_day()
+    else:
+        driver.weekly_due_day = None
 
     if application_info_update is not None:
         if not isinstance(application_info_update, dict):
