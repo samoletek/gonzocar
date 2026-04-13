@@ -33,8 +33,7 @@ export default function Payments() {
     const [drivers, setDrivers] = useState<Driver[]>([]);
     const [stats, setStats] = useState<Stats | null>(null);
     const [loading, setLoading] = useState(true);
-    const [assigning, setAssigning] = useState<string | null>(null);
-    const [selectedDriver, setSelectedDriver] = useState<string>('');
+    const [assigningPaymentId, setAssigningPaymentId] = useState<string | null>(null);
 
     useEffect(() => {
         loadData();
@@ -43,7 +42,7 @@ export default function Payments() {
     async function loadData() {
         try {
             const [paymentsData, driversData, statsData] = await Promise.all([
-                api.getUnrecognizedPayments(),
+                api.getAllPayments(0, 200),
                 api.getDrivers(),
                 api.getPaymentStats(),
             ]);
@@ -57,15 +56,16 @@ export default function Payments() {
         }
     }
 
-    async function handleAssign(paymentId: string) {
-        if (!selectedDriver) return;
+    async function handleDriverChange(payment: Payment, nextDriverId: string) {
+        if (!nextDriverId || payment.matched) return;
         try {
-            await api.assignPayment(paymentId, selectedDriver, true);
-            setAssigning(null);
-            setSelectedDriver('');
-            loadData();
+            setAssigningPaymentId(payment.id);
+            await api.assignPayment(payment.id, nextDriverId, true);
+            await loadData();
         } catch (error) {
             console.error('Failed to assign payment:', error);
+        } finally {
+            setAssigningPaymentId(null);
         }
     }
 
@@ -90,7 +90,7 @@ export default function Payments() {
                     Payments
                 </h1>
                 <p style={{ color: 'var(--dark-gray)', opacity: 0.7 }}>
-                    Review and assign unrecognized payments
+                    Review all payments and assign unmatched records
                 </p>
             </div>
 
@@ -151,7 +151,7 @@ export default function Payments() {
                     borderBottom: '1px solid var(--light-gray)',
                 }}>
                     <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1rem', color: 'var(--dark-gray)' }}>
-                        Unrecognized Payments
+                        All Payments
                     </h3>
                 </div>
 
@@ -161,7 +161,7 @@ export default function Payments() {
                     </div>
                 ) : payments.length === 0 ? (
                     <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--dark-gray)', opacity: 0.6 }}>
-                        All payments have been matched!
+                        No payments found.
                     </div>
                 ) : (
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -172,12 +172,16 @@ export default function Payments() {
                                 <th style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'left', color: 'var(--dark-gray)', fontWeight: 600, fontSize: '0.75rem' }}>Memo</th>
                                 <th style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'left', color: 'var(--dark-gray)', fontWeight: 600, fontSize: '0.75rem' }}>Date</th>
                                 <th style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right', color: 'var(--dark-gray)', fontWeight: 600, fontSize: '0.75rem' }}>Amount</th>
-                                <th style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'left', color: 'var(--dark-gray)', fontWeight: 600, fontSize: '0.75rem' }}>Action</th>
+                                <th style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'left', color: 'var(--dark-gray)', fontWeight: 600, fontSize: '0.75rem' }}>Status</th>
+                                <th style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'left', color: 'var(--dark-gray)', fontWeight: 600, fontSize: '0.75rem' }}>Driver</th>
                             </tr>
                         </thead>
                         <tbody>
                             {payments.map((payment) => {
                                 const sourceStyle = sourceColors[payment.source] || sourceColors.zelle;
+                                const assignedDriver = payment.driver_id
+                                    ? drivers.find((driver) => driver.id === payment.driver_id) || null
+                                    : null;
                                 return (
                                     <tr key={payment.id} style={{ borderTop: '1px solid var(--light-gray)' }}>
                                         <td style={{ padding: 'var(--space-2) var(--space-3)' }}>
@@ -214,76 +218,46 @@ export default function Payments() {
                                             ${payment.amount.toFixed(2)}
                                         </td>
                                         <td style={{ padding: 'var(--space-2) var(--space-3)' }}>
-                                            {assigning === payment.id ? (
-                                                <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center' }}>
-                                                    <select
-                                                        value={selectedDriver}
-                                                        onChange={(e) => setSelectedDriver(e.target.value)}
-                                                        style={{
-                                                            padding: '4px 8px',
-                                                            border: '1px solid var(--medium-gray)',
-                                                            borderRadius: 'var(--radius-small)',
-                                                            color: 'var(--dark-gray)',
-                                                            fontSize: '0.75rem',
-                                                            background: 'var(--white)',
-                                                        }}
-                                                    >
-                                                        <option value="">Select driver...</option>
-                                                        {drivers.map((d) => (
-                                                            <option key={d.id} value={d.id}>
-                                                                {d.first_name} {d.last_name}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                    <button
-                                                        onClick={() => handleAssign(payment.id)}
-                                                        disabled={!selectedDriver}
-                                                        style={{
-                                                            padding: '4px 8px',
-                                                            background: 'var(--success-green)',
-                                                            border: 'none',
-                                                            borderRadius: 'var(--radius-small)',
-                                                            color: 'var(--white)',
-                                                            fontSize: '0.75rem',
-                                                            fontWeight: 500,
-                                                            cursor: selectedDriver ? 'pointer' : 'not-allowed',
-                                                            opacity: selectedDriver ? 1 : 0.5,
-                                                        }}
-                                                    >
-                                                        Save
-                                                    </button>
-                                                    <button
-                                                        onClick={() => { setAssigning(null); setSelectedDriver(''); }}
-                                                        style={{
-                                                            padding: '4px 8px',
-                                                            background: 'var(--light-gray)',
-                                                            border: '1px solid var(--medium-gray)',
-                                                            borderRadius: 'var(--radius-small)',
-                                                            color: 'var(--dark-gray)',
-                                                            fontSize: '0.75rem',
-                                                            cursor: 'pointer',
-                                                        }}
-                                                    >
-                                                        Cancel
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <button
-                                                    onClick={() => setAssigning(payment.id)}
-                                                    style={{
-                                                        padding: '4px 12px',
-                                                        background: 'var(--primary-blue)',
-                                                        border: 'none',
-                                                        borderRadius: 'var(--radius-small)',
-                                                        color: 'var(--white)',
-                                                        fontSize: '0.75rem',
-                                                        fontWeight: 500,
-                                                        cursor: 'pointer',
-                                                    }}
-                                                >
-                                                    Assign to Driver
-                                                </button>
-                                            )}
+                                            <span style={{
+                                                display: 'inline-block',
+                                                padding: '4px 8px',
+                                                borderRadius: '9999px',
+                                                fontSize: '0.75rem',
+                                                fontWeight: 600,
+                                                background: payment.matched ? '#DCFCE7' : '#FEF3C7',
+                                                color: payment.matched ? '#15803D' : '#B45309',
+                                            }}>
+                                                {payment.matched ? 'Matched' : 'Unmatched'}
+                                            </span>
+                                        </td>
+                                        <td style={{ padding: 'var(--space-2) var(--space-3)' }}>
+                                            <select
+                                                value={payment.driver_id ?? ''}
+                                                onChange={(e) => handleDriverChange(payment, e.target.value)}
+                                                disabled={payment.matched || assigningPaymentId === payment.id}
+                                                style={{
+                                                    minWidth: '180px',
+                                                    padding: '4px 8px',
+                                                    border: '1px solid var(--medium-gray)',
+                                                    borderRadius: 'var(--radius-small)',
+                                                    color: 'var(--dark-gray)',
+                                                    fontSize: '0.75rem',
+                                                    background: 'var(--white)',
+                                                    opacity: payment.matched ? 0.8 : 1,
+                                                }}
+                                            >
+                                                <option value="">---</option>
+                                                {payment.driver_id && !assignedDriver && (
+                                                    <option value={payment.driver_id}>
+                                                        Assigned Driver
+                                                    </option>
+                                                )}
+                                                {drivers.map((driver) => (
+                                                    <option key={driver.id} value={driver.id}>
+                                                        {driver.first_name} {driver.last_name}
+                                                    </option>
+                                                ))}
+                                            </select>
                                         </td>
                                     </tr>
                                 );

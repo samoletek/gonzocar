@@ -417,6 +417,16 @@ class ApiService {
         return response.json();
     }
 
+    async getAllPayments(skip: number = 0, limit: number = 100) {
+        const params = new URLSearchParams({
+            skip: String(skip),
+            limit: String(limit),
+        });
+        const response = await fetch(`${API_URL}/payments/all?${params.toString()}`, { headers: this.headers() });
+        if (!response.ok) throw new Error("Failed to fetch payments");
+        return response.json();
+    }
+
     async getPaymentStats(period?: string) {
         const url = period ? `${API_URL}/payments/stats?period=${period}` : `${API_URL}/payments/stats`;
         const response = await fetch(url, { headers: this.headers() });
