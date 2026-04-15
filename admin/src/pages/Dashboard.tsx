@@ -621,6 +621,19 @@ export default function Dashboard() {
         return result;
     }, [drivers]);
 
+    const balanceTotalDrivers = Math.max(1, balanceBreakdown.positive + balanceBreakdown.zero + balanceBreakdown.negative);
+    const positiveBalancePct = (balanceBreakdown.positive / balanceTotalDrivers) * 100;
+    const zeroBalancePct = (balanceBreakdown.zero / balanceTotalDrivers) * 100;
+    const negativeBalancePct = (balanceBreakdown.negative / balanceTotalDrivers) * 100;
+    const balancePieGradient =
+        driverSummary.total > 0
+            ? `conic-gradient(
+                #1D7A46 0 ${positiveBalancePct}%,
+                #A8B5C9 ${positiveBalancePct}% ${positiveBalancePct + zeroBalancePct}%,
+                #B9505B ${positiveBalancePct + zeroBalancePct}% 100%
+            )`
+            : "#E8EEF8";
+
     const totalPayments = toNumber(paymentStats?.total_payments);
     const matchedPayments = toNumber(paymentStats?.matched_payments);
     const unmatchedPayments = toNumber(paymentStats?.unmatched_payments);
@@ -687,14 +700,14 @@ export default function Dashboard() {
                     padding: "20px 22px",
                 }}
             >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: "16px", flexWrap: "wrap", alignItems: "flex-end" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                     <div>
                         <h1 style={{ fontFamily: "var(--font-heading)", fontSize: "2rem", lineHeight: 1.05, color: "#1D2634" }}>Operations Dashboard</h1>
                         <p style={{ marginTop: "8px", color: "#60718A", fontSize: "0.9rem" }}>
                             Chicago snapshot {chicagoNow} · Billing due day <strong style={{ color: "#243A5A", textTransform: "capitalize" }}>{chicagoDayName}</strong>
                         </p>
                     </div>
-                    <div style={{ display: "grid", gap: "10px", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", flex: "1 1 560px" }}>
+                    <div style={{ display: "grid", gap: "10px", gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
                         <KpiTile label="Gross Processed" value={formatCurrency(grossAmount)} hint={`${totalPayments} total payments`} accent="#274B7A" />
                         <KpiTile label="Matched Value" value={formatCurrency(matchedAmount)} hint={`${formatPercent(matchRate)} auto/manual matched`} accent="#1D7A46" />
                         <KpiTile label="Queue Value" value={formatCurrency(unmatchedAmount)} hint={`${unmatchedPayments} pending (${formatPercent(unmatchedRate)})`} accent="#B96E00" />
@@ -703,7 +716,7 @@ export default function Dashboard() {
                 </div>
             </section>
 
-            <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px" }}>
+            <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: "10px" }}>
                 <KpiTile label="Collected Today" value={formatCurrency(paymentWindows.today)} hint="Chicago day" accent="#1E4D8C" />
                 <KpiTile label="7-Day Collection" value={formatCurrency(paymentWindows.sevenDays)} hint="rolling window" accent="#355C9A" />
                 <KpiTile label="30-Day Collection" value={formatCurrency(paymentWindows.thirtyDays)} hint="rolling window" accent="#4B70B0" />
@@ -724,17 +737,29 @@ export default function Dashboard() {
                 >
                     <div style={{ display: "flex", alignItems: "flex-end", gap: "6px", height: "182px", paddingTop: "6px" }}>
                         {trendPoints.map((point, index) => {
-                            const heightPct = Math.max(4, Math.round((point.amount / trendMax) * 100));
+                            const barHeightPx = point.amount > 0 ? Math.max(10, Math.round((point.amount / trendMax) * 150)) : 4;
                             return (
-                                <div key={point.key} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
+                                <div
+                                    key={point.key}
+                                    style={{
+                                        flex: 1,
+                                        minWidth: 0,
+                                        height: "100%",
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        justifyContent: "flex-end",
+                                        alignItems: "center",
+                                        gap: "6px",
+                                    }}
+                                >
                                     <div
                                         title={`${point.label}: ${formatCurrency(point.amount)}`}
                                         style={{
                                             width: "100%",
-                                            height: `${heightPct}%`,
+                                            height: `${barHeightPx}px`,
                                             borderRadius: "8px 8px 3px 3px",
-                                            background: "linear-gradient(180deg, #3F6FB5 0%, #274B7A 100%)",
-                                            boxShadow: "0 6px 12px rgba(39, 75, 122, 0.22)",
+                                            background: point.amount > 0 ? "linear-gradient(180deg, #3F6FB5 0%, #274B7A 100%)" : "#D6E0EE",
+                                            boxShadow: point.amount > 0 ? "0 6px 12px rgba(39, 75, 122, 0.22)" : "none",
                                         }}
                                     />
                                     <span style={{ fontSize: "0.66rem", color: "#78879D" }}>{index % 3 === 0 ? point.label : ""}</span>
@@ -894,18 +919,54 @@ export default function Dashboard() {
                 </Panel>
 
                 <Panel title="Driver Balance Distribution" subtitle="How balances are split across the fleet" action={<Link to="/drivers" style={{ fontSize: "0.8rem", color: "var(--primary-blue)", textDecoration: "none", fontWeight: 700 }}>Drivers</Link>}>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "12px" }}>
-                        <div style={{ border: "1px solid #E4EAF3", borderRadius: "10px", padding: "8px", background: "#F3FBF5" }}>
-                            <div style={{ fontSize: "0.7rem", color: "#4B7D5D", textTransform: "uppercase" }}>Positive</div>
-                            <div style={{ ...METRIC_VALUE_STYLE, marginTop: "2px", color: "#1D7A46" }}>{balanceBreakdown.positive}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "128px 1fr", gap: "12px", alignItems: "center", marginBottom: "12px" }}>
+                        <div
+                            style={{
+                                width: "128px",
+                                height: "128px",
+                                borderRadius: "999px",
+                                background: balancePieGradient,
+                                border: "1px solid #DFE6F2",
+                                display: "grid",
+                                placeItems: "center",
+                                margin: "0 auto",
+                            }}
+                        >
+                            <div
+                                style={{
+                                    width: "76px",
+                                    height: "76px",
+                                    borderRadius: "999px",
+                                    background: "#FFFFFF",
+                                    border: "1px solid #E8EEF8",
+                                    display: "grid",
+                                    placeItems: "center",
+                                    textAlign: "center",
+                                }}
+                            >
+                                <div>
+                                    <div style={{ fontSize: "0.6rem", color: "#7B8BA0", textTransform: "uppercase", letterSpacing: "0.05em" }}>Drivers</div>
+                                    <div style={{ ...METRIC_VALUE_STYLE, fontSize: "1.1rem", lineHeight: 1.1, color: "#2A3648" }}>{driverSummary.total}</div>
+                                </div>
+                            </div>
                         </div>
-                        <div style={{ border: "1px solid #E4EAF3", borderRadius: "10px", padding: "8px", background: "#FBFDFF" }}>
-                            <div style={{ fontSize: "0.7rem", color: "#6D7D95", textTransform: "uppercase" }}>Zero</div>
-                            <div style={{ ...METRIC_VALUE_STYLE, marginTop: "2px", color: "#60718A" }}>{balanceBreakdown.zero}</div>
-                        </div>
-                        <div style={{ border: "1px solid #E4EAF3", borderRadius: "10px", padding: "8px", background: "#FFF5F5" }}>
-                            <div style={{ fontSize: "0.7rem", color: "#A05E69", textTransform: "uppercase" }}>Negative</div>
-                            <div style={{ ...METRIC_VALUE_STYLE, marginTop: "2px", color: "#A42C36" }}>{balanceBreakdown.negative}</div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+                            <div style={{ border: "1px solid #E4EAF3", borderRadius: "10px", padding: "8px", background: "#F3FBF5" }}>
+                                <div style={{ fontSize: "0.7rem", color: "#4B7D5D", textTransform: "uppercase" }}>Positive</div>
+                                <div style={{ ...METRIC_VALUE_STYLE, marginTop: "2px", color: "#1D7A46" }}>{balanceBreakdown.positive}</div>
+                                <div style={{ fontSize: "0.72rem", color: "#5E7E69" }}>{formatPercent(positiveBalancePct)}</div>
+                            </div>
+                            <div style={{ border: "1px solid #E4EAF3", borderRadius: "10px", padding: "8px", background: "#FBFDFF" }}>
+                                <div style={{ fontSize: "0.7rem", color: "#6D7D95", textTransform: "uppercase" }}>Zero</div>
+                                <div style={{ ...METRIC_VALUE_STYLE, marginTop: "2px", color: "#60718A" }}>{balanceBreakdown.zero}</div>
+                                <div style={{ fontSize: "0.72rem", color: "#7A899E" }}>{formatPercent(zeroBalancePct)}</div>
+                            </div>
+                            <div style={{ border: "1px solid #E4EAF3", borderRadius: "10px", padding: "8px", background: "#FFF5F5" }}>
+                                <div style={{ fontSize: "0.7rem", color: "#A05E69", textTransform: "uppercase" }}>Negative</div>
+                                <div style={{ ...METRIC_VALUE_STYLE, marginTop: "2px", color: "#A42C36" }}>{balanceBreakdown.negative}</div>
+                                <div style={{ fontSize: "0.72rem", color: "#A16A73" }}>{formatPercent(negativeBalancePct)}</div>
+                            </div>
                         </div>
                     </div>
 
