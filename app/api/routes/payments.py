@@ -125,12 +125,12 @@ def assign_payment(
     current_user: Staff = Depends(get_current_user)
 ):
     """
-    Assign an unrecognized payment to a driver.
-    
+    Assign or reassign a payment to a driver.
+
     This will:
-    1. Update the payment record with driver_id
-    2. Create a ledger credit entry
-    3. Optionally create an alias for future matching
+    1. Update payment.driver_id (and mark matched=true)
+    2. Create or move the linked ledger credit entry
+    3. Optionally create/update alias for future matching
     """
     # Get payment
     payment = db.query(PaymentRaw).filter(PaymentRaw.id == payment_id).first()
@@ -140,12 +140,6 @@ def assign_payment(
             detail="Payment not found"
         )
     
-    if payment.matched:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Payment is already matched"
-        )
-    
     # Get driver
     driver = db.query(Driver).filter(Driver.id == data.driver_id).first()
     if not driver:
@@ -153,32 +147,45 @@ def assign_payment(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Driver not found"
         )
-    
-    # Update payment
+
+    source_value = payment.source.value if hasattr(payment.source, "value") else str(payment.source)
+    payment_description = f"{source_value.upper()} payment from {payment.sender_name}"
+
+    # Update payment driver (reassignment allowed for already matched entries)
     payment.driver_id = driver.id
     payment.matched = True
-    
-    # Create ledger entry
-    ledger_entry = Ledger(
-        driver_id=driver.id,
-        type='credit',
-        amount=payment.amount,
-        description=f"{payment.source.value.upper()} payment from {payment.sender_name}",
-        reference_id=payment.id,
-        created_at=datetime.utcnow()
-    )
-    db.add(ledger_entry)
-    
-    # Create alias for future matching
+
+    # Keep a single source-of-truth ledger credit per payment reference.
+    linked_ledger_entries = db.query(Ledger).filter(
+        Ledger.reference_id == payment.id,
+        Ledger.type == "credit",
+    ).all()
+
+    if linked_ledger_entries:
+        for entry in linked_ledger_entries:
+            entry.driver_id = driver.id
+            entry.description = payment_description
+    else:
+        ledger_entry = Ledger(
+            driver_id=driver.id,
+            type="credit",
+            amount=payment.amount,
+            description=payment_description,
+            reference_id=payment.id,
+            created_at=datetime.utcnow(),
+        )
+        db.add(ledger_entry)
+
+    # Create or move alias for future matching
     if data.create_alias and (payment.sender_name or payment.sender_identifier):
         # Determine alias type based on payment source
         alias_type_map = {
-            'zelle': AliasType.zelle,
-            'venmo': AliasType.venmo,
-            'cashapp': AliasType.cashapp,
-            'chime': AliasType.chime,
+            "zelle": AliasType.zelle,
+            "venmo": AliasType.venmo,
+            "cashapp": AliasType.cashapp,
+            "chime": AliasType.chime,
         }
-        alias_type = alias_type_map.get(payment.source.value, AliasType.zelle)
+        alias_type = alias_type_map.get(source_value, AliasType.zelle)
 
         alias_candidates = []
         if payment.sender_name:
@@ -193,6 +200,9 @@ def assign_payment(
                 func.lower(Alias.alias_value) == candidate.lower()
             ).first()
             if existing_alias:
+                if existing_alias.driver_id != driver.id:
+                    existing_alias.driver_id = driver.id
+                    existing_alias.alias_type = alias_type
                 continue
             new_alias = Alias(
                 driver_id=driver.id,

@@ -57,7 +57,8 @@ export default function Payments() {
     }
 
     async function handleDriverChange(payment: Payment, nextDriverId: string) {
-        if (!nextDriverId || payment.matched) return;
+        if (!nextDriverId) return;
+        if (payment.driver_id === nextDriverId) return;
         try {
             setAssigningPaymentId(payment.id);
             await api.assignPayment(payment.id, nextDriverId, true);
@@ -220,7 +221,7 @@ export default function Payments() {
                                             <select
                                                 value={payment.driver_id ?? ''}
                                                 onChange={(e) => handleDriverChange(payment, e.target.value)}
-                                                disabled={payment.matched || assigningPaymentId === payment.id}
+                                                disabled={assigningPaymentId === payment.id}
                                                 style={{
                                                     minWidth: '180px',
                                                     padding: '4px 8px',
@@ -229,7 +230,7 @@ export default function Payments() {
                                                     color: 'var(--dark-gray)',
                                                     fontSize: '0.75rem',
                                                     background: 'var(--white)',
-                                                    opacity: payment.matched ? 0.8 : 1,
+                                                    opacity: assigningPaymentId === payment.id ? 0.7 : 1,
                                                 }}
                                             >
                                                 <option value="">---</option>
