@@ -114,8 +114,8 @@ class GmailService:
                 creds.refresh(Request())
                 # Update token in env if using env-based auth
                 if token_data:
-                    print("Token refreshed. Update GMAIL_TOKEN env variable with new token.")
-                    print(f"New token (base64): {base64.b64encode(creds.to_json().encode()).decode()}")
+                    # Never log refreshed token value in production logs.
+                    print("Gmail token refreshed successfully.")
                 else:
                     # Save refreshed token to file
                     with open(self.token_path, 'w') as token:
