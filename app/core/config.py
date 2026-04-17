@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     
     # Stripe
     stripe_api_key: str = ""
+
+    # Internal cron trigger (Railway function -> backend)
+    internal_cron_token: str = ""
     
     class Config:
         env_file = ".env.local"

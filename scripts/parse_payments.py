@@ -292,7 +292,16 @@ if __name__ == "__main__":
                 print("Invalid --hours argument, defaulting to 1 hour")
 
         max_results = 50
-        if '--from-last' in sys.argv:
+        use_from_last = '--from-last' in sys.argv
+
+        # In GitHub Actions schedule mode, enable backfill by default.
+        # This prevents gaps when cron triggers are delayed.
+        if os.getenv("GITHUB_ACTIONS", "").lower() == "true" and '--no-from-last' not in sys.argv:
+            if not use_from_last:
+                print("GITHUB_ACTIONS detected: enabling --from-last backfill mode")
+            use_from_last = True
+
+        if use_from_last:
             db = get_db()
             try:
                 last_created_at = get_last_payment_created_at(db)

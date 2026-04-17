@@ -1,9 +1,6 @@
 name: Payment Parser
 
 on:
-  schedule:
-    # Every 5 minutes
-    - cron: '*/5 * * * *'
   workflow_dispatch: # Allow manual trigger
 
 env:
@@ -33,4 +30,4 @@ jobs:
           echo '${{ secrets.GMAIL_TOKEN }}' > token.json
       
       - name: Run payment parser
-        run: python scripts/parse_payments.py
+        run: python scripts/parse_payments.py --from-last

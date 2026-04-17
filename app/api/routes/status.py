@@ -1,15 +1,24 @@
 """
 System status endpoint for checking service health.
 """
-from fastapi import APIRouter, Depends
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 import os
 import httpx
 
 from app.api.deps import get_db, get_current_user
+from app.core.config import get_settings
 from app.models import Staff
 from app.services.gmail_service import GmailService
+from scripts.parse_payments import (
+    compute_backfill_hours,
+    get_db as get_parser_db,
+    get_last_payment_created_at,
+    run_with_gmail,
+)
 
 router = APIRouter(prefix="/status", tags=["status"])
 
@@ -26,6 +35,58 @@ def get_system_status(
         "gmail": check_gmail(),
     }
     return status
+
+
+@router.post("/run-payment-parser")
+def run_payment_parser(
+    authorization: str | None = Header(default=None),
+    x_cron_token: str | None = Header(default=None),
+):
+    """
+    Trigger payment parser from Railway cron function.
+    Protected by INTERNAL_CRON_TOKEN.
+    """
+    settings = get_settings()
+    expected_token = (settings.internal_cron_token or "").strip()
+    if not expected_token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Internal cron token not configured",
+        )
+
+    provided_token = (x_cron_token or "").strip()
+    if not provided_token and authorization:
+        auth_value = authorization.strip()
+        if auth_value.lower().startswith("bearer "):
+            provided_token = auth_value[7:].strip()
+
+    if provided_token != expected_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid cron token")
+
+    parser_db = get_parser_db()
+    last_created_at = None
+    try:
+        last_created_at = get_last_payment_created_at(parser_db)
+    finally:
+        parser_db.close()
+
+    hours = 1
+    max_results = 200
+    if last_created_at:
+        hours = compute_backfill_hours(last_created_at, min_hours=hours, safety_hours=1)
+        max_results = 2000
+
+    success = run_with_gmail(hours=hours, max_results=max_results)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Payment parser run failed")
+
+    return {
+        "ok": True,
+        "executed_at": datetime.utcnow().isoformat(),
+        "lookback_hours": hours,
+        "max_results": max_results,
+        "last_payment_created_at": last_created_at.isoformat() if last_created_at else None,
+    }
 
 
 def check_database(db: Session) -> dict:
